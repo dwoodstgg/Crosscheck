@@ -1,0 +1,187 @@
+@using System.Globalization
+@using ProjectTango.Application.Projects
+@using ProjectTango.Domain.Enums
+@model ProjectDashboard
+@{
+    ViewData["Title"] = $"{Model.Project.Code} dashboard";
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C2", usd);
+    string Hrs(decimal h) => h.ToString("0.##");
+
+    static string StatusBadge(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Active => "text-bg-success",
+        ProjectStatus.OnHold => "text-bg-warning",
+        ProjectStatus.Draft => "text-bg-secondary",
+        ProjectStatus.Closed => "text-bg-dark",
+        _ => "text-bg-light",
+    };
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-3 gap-2">
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <h1 class="h3 mb-0"><code>@Model.Project.Code</code> @Model.Project.Name</h1>
+            <span class="badge @StatusBadge(Model.Project.Status)">@(Model.Project.Status == ProjectStatus.OnHold ? "On hold" : Model.Project.Status.ToString())</span>
+        </div>
+        <div class="text-muted">@Model.ClientName</div>
+    </div>
+    <div class="btn-group">
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Index">All projects</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Edit" asp-route-id="@Model.Project.Id">Manage</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-controller="Approvals" asp-action="Index" asp-route-projectId="@Model.Project.Id">Approvals</a>
+    </div>
+</div>
+
+@if (Model.HasRateGaps)
+{
+    <div class="alert alert-warning">
+        Some billable entries have no rate card for their date, so the dollar figures below understate
+        the real value. Add the missing rates on the <a asp-action="Edit" asp-route-id="@Model.Project.Id">Manage</a> page.
+    </div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Hours worked</div>
+            <div class="fs-3 fw-semibold">@Hrs(Model.Totals.HoursWorked)</div>
+            <div class="text-muted small">@Hrs(Model.Totals.HoursBilled) billed</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">WIP (approved)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.ApprovedValue)</div>
+            <div class="text-muted small">@Model.Totals.ApprovedCount entries un-invoiced</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Invoiced</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.InvoicedValue)</div>
+            <div class="text-muted small">@Model.Totals.InvoicedCount entries</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Pending (open)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.PendingValue)</div>
+            <div class="text-muted small">@Model.Totals.OpenCount entries awaiting approval</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card panel-card">
+            <div class="card-header">Hours &amp; value by billing role</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Role</th><th class="text-end">Worked</th><th class="text-end">Billed</th><th class="text-end pe-3">Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in Model.ByRole)
+                        {
+                            <tr>
+                                <td class="ps-3">@r.RoleName</td>
+                                <td class="text-end">@Hrs(r.HoursWorked)</td>
+                                <td class="text-end">@Hrs(r.HoursBilled)</td>
+                                <td class="text-end pe-3">@Money(r.Value)</td>
+                            </tr>
+                        }
+                        @if (Model.ByRole.Count == 0)
+                        {
+                            <tr><td colspan="4" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card panel-card">
+            <div class="card-header">Hours &amp; value by person</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Person</th><th class="text-end">Worked</th><th class="text-end">Billed</th><th class="text-end pe-3">Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in Model.ByPerson)
+                        {
+                            <tr>
+                                <td class="ps-3">@p.EmployeeName</td>
+                                <td class="text-end">@Hrs(p.HoursWorked)</td>
+                                <td class="text-end">@Hrs(p.HoursBilled)</td>
+                                <td class="text-end pe-3">@Money(p.Value)</td>
+                            </tr>
+                        }
+                        @if (Model.ByPerson.Count == 0)
+                        {
+                            <tr><td colspan="4" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card panel-card">
+            <div class="card-header">Team</div>
+            <ul class="list-group list-group-flush">
+                @foreach (var t in Model.Team.Where(t => t.Assignment.EndDate is null))
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>@t.EmployeeName</span>
+                        @if (t.DefaultRoleName is not null)
+                        {
+                            <span class="badge text-bg-light text-muted">@t.DefaultRoleName</span>
+                        }
+                    </li>
+                }
+                @if (!Model.Team.Any(t => t.Assignment.EndDate is null))
+                {
+                    <li class="list-group-item text-muted">No active assignments.</li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card panel-card">
+            <div class="card-header">Recent activity</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Date</th><th>Person</th><th>Role</th><th class="text-end">Worked</th><th class="pe-3">Status</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Model.Recent)
+                        {
+                            <tr>
+                                <td class="ps-3 text-nowrap">@e.Date.ToString("MMM d")</td>
+                                <td>@e.EmployeeName</td>
+                                <td>@e.RoleName @(!e.IsBillable ? "•" : "")</td>
+                                <td class="text-end">@Hrs(e.HoursWorked)</td>
+                                <td class="pe-3">
+                                    <span class="badge @(e.Status switch {
+                                        TimeEntryStatus.Open => "text-bg-warning-subtle text-warning-emphasis border border-warning-subtle",
+                                        TimeEntryStatus.Approved => "text-bg-success-subtle text-success-emphasis border border-success-subtle",
+                                        _ => "text-bg-secondary" })">@e.Status.ToString().ToLowerInvariant()</span>
+                                </td>
+                            </tr>
+                        }
+                        @if (Model.Recent.Count == 0)
+                        {
+                            <tr><td colspan="5" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

@@ -12,12 +12,20 @@ namespace ProjectTango.Web.Controllers;
 public class ProjectsController(
     ProjectAdminService projectAdmin,
     RateCardService rateCardService,
-    AssignmentService assignmentService) : Controller
+    AssignmentService assignmentService,
+    ProjectDashboardService dashboardService) : Controller
 {
     public async Task<IActionResult> Index(CancellationToken cancellationToken)
     {
         var projects = await projectAdmin.ListAsync(cancellationToken);
         return View(projects);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Dashboard(Guid id, CancellationToken cancellationToken)
+    {
+        var dashboard = await dashboardService.GetAsync(id, cancellationToken);
+        return dashboard is null ? NotFound() : View(dashboard);
     }
 
     [HttpGet]

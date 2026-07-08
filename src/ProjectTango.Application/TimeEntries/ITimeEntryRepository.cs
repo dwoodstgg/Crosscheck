@@ -1,9 +1,25 @@
 using ProjectTango.Domain.Entities;
+using ProjectTango.Domain.Enums;
 
 namespace ProjectTango.Application.TimeEntries;
 
 /// <summary>A time entry joined with the display names an approver needs.</summary>
 public record ApprovalEntry(TimeEntry Entry, string EmployeeName, string BillingRoleName);
+
+/// <summary>One project time entry flattened for burn reporting, with its billing rate
+/// resolved for the entry date (null when no rate card covers it — a billable gap).</summary>
+public record BurnRow(
+    Guid EntryId,
+    DateOnly EntryDate,
+    TimeEntryStatus Status,
+    bool IsBillable,
+    Guid EmployeeId,
+    string EmployeeName,
+    Guid BillingRoleId,
+    string RoleName,
+    decimal HoursWorked,
+    decimal HoursBilled,
+    decimal? ResolvedRate);
 
 public interface ITimeEntryRepository
 {
@@ -17,6 +33,10 @@ public interface ITimeEntryRepository
 
     /// <summary>A project's entries in a date range, with employee and role names (approvals).</summary>
     Task<IReadOnlyList<ApprovalEntry>> GetForProjectRangeAsync(Guid projectId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
+
+    /// <summary>Every entry on a project, flattened with its resolved billing rate, for the
+    /// dashboard burn view.</summary>
+    Task<IReadOnlyList<BurnRow>> GetBurnRowsAsync(Guid projectId, CancellationToken cancellationToken = default);
 
     Task AddAsync(TimeEntry entry, CancellationToken cancellationToken = default);
 

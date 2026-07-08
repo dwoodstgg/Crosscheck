@@ -17,6 +17,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0"><code>@project.Code</code> @project.Name</h1>
     <div>
+        <a class="btn btn-outline-secondary" asp-action="Dashboard" asp-route-id="@project.Id">Dashboard</a>
         @if (project.Status == ProjectStatus.Draft)
         {
             <form asp-action="SetStatus" asp-route-id="@project.Id" method="post" class="d-inline">

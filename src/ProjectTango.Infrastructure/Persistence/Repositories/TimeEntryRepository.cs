@@ -65,6 +65,37 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
         return rows.Select(row => new ApprovalEntry(ToEntity(row), row.EmployeeName!, row.BillingRoleName!)).ToList();
     }
 
+    public async Task<IReadOnlyList<BurnRow>> GetBurnRowsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<BurnQueryRow>(new CommandDefinition(
+            """
+            SELECT te.id, te.entry_date, te.status, te.is_billable,
+                   te.employee_id, e.display_name AS employee_name,
+                   te.billing_role_id, r.display_name AS role_name,
+                   te.hours_worked, te.hours_billed,
+                   (SELECT rc.hourly_rate
+                    FROM project_rate_cards rc
+                    WHERE rc.project_id = te.project_id
+                      AND rc.role_id = te.billing_role_id
+                      AND rc.effective_from <= te.entry_date
+                      AND (rc.effective_to IS NULL OR rc.effective_to >= te.entry_date)
+                    LIMIT 1) AS resolved_rate
+            FROM time_entries te
+            JOIN employees e ON e.id = te.employee_id
+            JOIN roles r ON r.id = te.billing_role_id
+            WHERE te.project_id = @projectId
+            ORDER BY te.entry_date DESC
+            """,
+            new { projectId },
+            cancellationToken: cancellationToken));
+
+        return rows.Select(row => new BurnRow(
+            row.Id, row.EntryDate, DbEnum.FromDb<TimeEntryStatus>(row.Status), row.IsBillable,
+            row.EmployeeId, row.EmployeeName!, row.BillingRoleId, row.RoleName!,
+            row.HoursWorked, row.HoursBilled, row.ResolvedRate)).ToList();
+    }
+
     public async Task AddAsync(TimeEntry entry, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -163,5 +194,20 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
     {
         public string? EmployeeName { get; set; }
         public string? BillingRoleName { get; set; }
+    }
+
+    private sealed class BurnQueryRow
+    {
+        public Guid Id { get; set; }
+        public DateOnly EntryDate { get; set; }
+        public string Status { get; set; } = "open";
+        public bool IsBillable { get; set; }
+        public Guid EmployeeId { get; set; }
+        public string? EmployeeName { get; set; }
+        public Guid BillingRoleId { get; set; }
+        public string? RoleName { get; set; }
+        public decimal HoursWorked { get; set; }
+        public decimal HoursBilled { get; set; }
+        public decimal? ResolvedRate { get; set; }
     }
 }

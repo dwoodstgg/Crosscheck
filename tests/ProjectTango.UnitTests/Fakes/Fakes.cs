@@ -291,6 +291,23 @@ public sealed class FakeTimeEntryRepository : ITimeEntryRepository
             .Select(e => new ApprovalEntry(e, "employee", "role"))
             .ToList());
 
+    /// <summary>Rates the fake resolves for a burn row, keyed on billing role. Tests set these.</summary>
+    public Dictionary<Guid, decimal> RatesByRole { get; } = [];
+    public Dictionary<Guid, string> EmployeeNames { get; } = [];
+    public Dictionary<Guid, string> RoleNames { get; } = [];
+
+    public Task<IReadOnlyList<BurnRow>> GetBurnRowsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<BurnRow>>(Entries
+            .Where(e => e.ProjectId == projectId)
+            .OrderByDescending(e => e.EntryDate)
+            .Select(e => new BurnRow(
+                e.Id, e.EntryDate, e.Status, e.IsBillable,
+                e.EmployeeId, EmployeeNames.GetValueOrDefault(e.EmployeeId, "employee"),
+                e.BillingRoleId, RoleNames.GetValueOrDefault(e.BillingRoleId, "role"),
+                e.HoursWorked, e.HoursBilled,
+                RatesByRole.TryGetValue(e.BillingRoleId, out var rate) ? rate : null))
+            .ToList());
+
     public Task AddAsync(TimeEntry entry, CancellationToken cancellationToken = default)
     {
         Entries.Add(entry);
