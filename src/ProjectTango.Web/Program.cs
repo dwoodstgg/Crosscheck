@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.Identity.Web.UI;
 using ProjectTango.Application;
 using ProjectTango.Application.Employees;
@@ -31,6 +32,10 @@ builder.Services.AddAuthentication()
 // employee id + role claims. Role grants take effect at the next sign-in.
 builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, options =>
 {
+    // Authorization code flow + PKCE (design-doc §4.1) — not the library default
+    // (implicit id_token), which Entra rejects unless enabled per-registration.
+    options.ResponseType = OpenIdConnectResponseType.Code;
+
     var previousOnTokenValidated = options.Events.OnTokenValidated;
     options.Events.OnTokenValidated = async context =>
     {
