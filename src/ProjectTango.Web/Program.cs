@@ -1,10 +1,13 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.UI;
 using ProjectTango.Application;
+using ProjectTango.Application.Employees;
 using ProjectTango.Infrastructure;
 using ProjectTango.Infrastructure.Persistence;
+using ProjectTango.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +25,36 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
 builder.Services.AddAuthentication()
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"), JwtBearerDefaults.AuthenticationScheme);
+
+// First sign-in provisioning (design-doc.md §4.2): resolve the Entra identity to an
+// employee record (linking by email if one pre-exists) and stamp the cookie with the
+// employee id + role claims. Role grants take effect at the next sign-in.
+builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, options =>
+{
+    var previousOnTokenValidated = options.Events.OnTokenValidated;
+    options.Events.OnTokenValidated = async context =>
+    {
+        await previousOnTokenValidated(context);
+
+        var principal = context.Principal!;
+        var entraOid = principal.GetObjectId()
+            ?? throw new InvalidOperationException("Entra token is missing the oid claim.");
+        var email = principal.FindFirstValue("preferred_username")
+            ?? throw new InvalidOperationException("Entra token is missing the preferred_username claim.");
+        var displayName = principal.FindFirstValue("name") ?? email;
+
+        var services = context.HttpContext.RequestServices;
+        var provisioning = services.GetRequiredService<EmployeeProvisioningService>();
+        var employees = services.GetRequiredService<IEmployeeRepository>();
+
+        var employee = await provisioning.ProvisionSignInAsync(entraOid, email, displayName);
+        var roleNames = await employees.GetRoleNamesAsync(employee.Id);
+
+        var identity = (ClaimsIdentity)principal.Identity!;
+        identity.AddClaim(new Claim(TangoClaims.EmployeeId, employee.Id.ToString()));
+        identity.AddClaims(roleNames.Select(r => new Claim(ClaimTypes.Role, r)));
+    };
+});
 
 builder.Services.AddAuthorization();
 
