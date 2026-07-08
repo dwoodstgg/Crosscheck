@@ -1,0 +1,223 @@
+@model TimesheetGridViewModel
+@{
+    ViewData["Title"] = "My Timesheet";
+    string Fmt(decimal h) => h == 0 ? "" : h.ToString("0.##");
+}
+
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+    <div class="d-flex align-items-center gap-2">
+        <h1 class="mb-0 h3">My Timesheet</h1>
+        <span class="text-muted">@Model.MonthLabel</span>
+    </div>
+    <div class="btn-group" role="group" aria-label="Month navigation">
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Index"
+           asp-route-year="@Model.PrevMonth.Year" asp-route-month="@Model.PrevMonth.Month">&laquo; Prev</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Index">Today</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Index"
+           asp-route-year="@Model.NextMonth.Year" asp-route-month="@Model.NextMonth.Month">Next &raquo;</a>
+    </div>
+</div>
+
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger">@err</div>
+}
+<div id="ts-error" class="alert alert-danger d-none" role="alert"></div>
+
+@if (!Model.HasEmployee)
+{
+    <div class="alert alert-warning">
+        Your account isn't linked to an employee record yet. Sign out and back in, or ask an
+        administrator to provision your access.
+    </div>
+    return;
+}
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+    @foreach (var w in Model.Windows)
+    {
+        <div class="d-flex align-items-center gap-2 border rounded px-3 py-2 bg-white">
+            <span class="small text-muted">@w.Label</span>
+            @if (w.Closed)
+            {
+                <span class="badge text-bg-secondary">closed</span>
+            }
+            else
+            {
+                <span class="badge text-bg-success-subtle text-success-emphasis border border-success-subtle">open</span>
+            }
+            @if (Model.CanManageWindows)
+            {
+                <form asp-action="@(w.Closed ? "ReopenWindow" : "CloseWindow")" method="post" class="m-0">
+                    <input type="hidden" name="periodStart" value="@w.Start.ToString("yyyy-MM-dd")" />
+                    <input type="hidden" name="year" value="@Model.Year" />
+                    <input type="hidden" name="month" value="@Model.Month" />
+                    <button type="submit" class="btn btn-sm @(w.Closed ? "btn-outline-primary" : "btn-outline-secondary")">
+                        @(w.Closed ? "Reopen" : "Close")
+                    </button>
+                </form>
+            }
+        </div>
+    }
+</div>
+
+@if (Model.Rows.Count == 0)
+{
+    <div class="alert alert-info">
+        You have no project assignments active in @Model.MonthLabel. A project manager assigns you
+        to a project before you can log time against it.
+    </div>
+    return;
+}
+
+@Html.AntiForgeryToken()
+
+<p class="text-muted small mb-2">
+    Enter hours in quarter-hour steps. Each row bills under the role selected on its left — change it
+    before editing a day if the work was a different kind. Entries save as you go; a closed window or an
+    approved entry is read-only.
+</p>
+
+<div class="ts-wrap">
+    <table class="ts-grid" id="ts-grid" data-save-url="@Url.Action("SaveHours")">
+        <thead>
+            <tr>
+                <th class="ts-proj">Project</th>
+                @foreach (var d in Model.Days)
+                {
+                    <th class="@(d.IsWeekend ? "ts-weekend" : "")">@d.Day<small>@d.WeekdayLabel</small></th>
+                }
+                <th class="ts-total">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in Model.Rows)
+            {
+                <tr data-project="@row.ProjectId">
+                    <td class="ts-proj">
+                        <div class="ts-code">@row.Code</div>
+                        <div class="ts-name">@row.Name</div>
+                        <select class="form-select form-select-sm ts-role" aria-label="Billing role for @row.Code">
+                            @foreach (var opt in Model.BillableRoleOptions)
+                            {
+                                var selected = row.DefaultBillingRoleId?.ToString() == opt.Value;
+                                <option value="@opt.Value" selected="@selected">@opt.Text</option>
+                            }
+                        </select>
+                    </td>
+                    @foreach (var d in Model.Days)
+                    {
+                        row.Cells.TryGetValue(d.Day, out var cell);
+                        var status = cell?.Status ?? "open";
+                        var editable = !d.Locked && status == "open";
+                        <td class="ts-cell @(d.IsWeekend ? "ts-weekend" : "") @(status == "approved" || status == "invoiced" ? "approved" : "")"
+                            data-date="@d.Date.ToString("yyyy-MM-dd")">
+                            <input type="number" class="ts-hours" min="0" max="24" step="0.25"
+                                   value="@(cell is null ? "" : Fmt(cell.Hours))"
+                                   title="@(cell?.Notes)"
+                                   data-role="@(cell?.BillingRoleId)"
+                                   @(editable ? "" : "disabled")/>
+                        </td>
+                    }
+                    <td class="ts-total ts-row-total">0</td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td class="ts-proj">Daily total</td>
+                @foreach (var d in Model.Days)
+                {
+                    <td class="ts-col-total @(d.IsWeekend ? "ts-weekend" : "")" data-day="@d.Day">0</td>
+                }
+                <td class="ts-total" id="ts-grand-total">0</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+@section Scripts {
+<script>
+    (function () {
+        const grid = document.getElementById('ts-grid');
+        const saveUrl = grid.dataset.saveUrl;
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const errorBox = document.getElementById('ts-error');
+
+        const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+        function recalc() {
+            const cols = {};
+            let grand = 0;
+            grid.querySelectorAll('tbody tr').forEach(tr => {
+                let rowTotal = 0;
+                tr.querySelectorAll('.ts-hours').forEach(inp => {
+                    const h = num(inp.value);
+                    rowTotal += h;
+                    const day = inp.closest('.ts-cell').dataset.date.slice(-2);
+                    cols[day] = (cols[day] || 0) + h;
+                });
+                tr.querySelector('.ts-row-total').textContent = rowTotal ? rowTotal.toFixed(2).replace(/\.?0+$/, '') : '0';
+                grand += rowTotal;
+            });
+            grid.querySelectorAll('.ts-col-total').forEach(td => {
+                const day = String(td.dataset.day).padStart(2, '0');
+                const v = cols[day] || 0;
+                td.textContent = v ? v.toFixed(2).replace(/\.?0+$/, '') : '0';
+            });
+            document.getElementById('ts-grand-total').textContent = grand ? grand.toFixed(2).replace(/\.?0+$/, '') : '0';
+        }
+
+        function flash(cell, cls) {
+            cell.classList.remove('saving', 'save-ok', 'save-err');
+            if (cls) cell.classList.add(cls);
+            if (cls === 'save-ok') setTimeout(() => cell.classList.remove('save-ok'), 700);
+        }
+
+        async function save(input) {
+            const cell = input.closest('.ts-cell');
+            const row = input.closest('tr');
+            const projectId = row.dataset.project;
+            const date = cell.dataset.date;
+            const billingRoleId = row.querySelector('.ts-role').value;
+            const hours = num(input.value);
+
+            flash(cell, 'saving');
+            try {
+                const res = await fetch(saveUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token },
+                    body: new URLSearchParams({ projectId, date, hours, billingRoleId, notes: '' })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    input.value = data.cleared ? '' : (data.hours ? String(data.hours).replace(/\.?0+$/, '') : '');
+                    input.dataset.role = billingRoleId;
+                    errorBox.classList.add('d-none');
+                    flash(cell, 'save-ok');
+                } else {
+                    errorBox.textContent = data.error || 'Could not save entry.';
+                    errorBox.classList.remove('d-none');
+                    flash(cell, 'save-err');
+                }
+            } catch {
+                errorBox.textContent = 'Could not reach the server. Try again.';
+                errorBox.classList.remove('d-none');
+                flash(cell, 'save-err');
+            }
+            recalc();
+        }
+
+        grid.querySelectorAll('.ts-hours').forEach(inp => {
+            inp.dataset.prev = inp.value;
+            inp.addEventListener('change', () => {
+                if (inp.value === inp.dataset.prev) return;
+                inp.dataset.prev = inp.value;
+                save(inp);
+            });
+        });
+
+        recalc();
+    })();
+</script>
+}

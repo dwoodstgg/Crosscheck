@@ -3,6 +3,7 @@ using ProjectTango.Application.Clients;
 using ProjectTango.Application.Employees;
 using ProjectTango.Application.Projects;
 using ProjectTango.Application.Roles;
+using ProjectTango.Application.TimeEntries;
 
 namespace ProjectTango.Application;
 
@@ -17,6 +18,10 @@ public static class DependencyInjection
         services.AddScoped<ProjectAdminService>();
         services.AddScoped<RateCardService>();
         services.AddScoped<AssignmentService>();
+        services.AddScoped<TimesheetService>();
+        services.AddScoped<TimeEntryService>();
+        services.AddScoped<ApprovalService>();
+        services.AddScoped<TimesheetPeriodService>();
         return services;
     }
 }

@@ -6,6 +6,7 @@ using ProjectTango.Application.Common;
 using ProjectTango.Application.Employees;
 using ProjectTango.Application.Projects;
 using ProjectTango.Application.Roles;
+using ProjectTango.Application.TimeEntries;
 using ProjectTango.Infrastructure.Persistence;
 using ProjectTango.Infrastructure.Persistence.Repositories;
 
@@ -28,6 +29,8 @@ public static class DependencyInjection
         services.AddScoped<IProjectRepository, ProjectRepository>();
         services.AddScoped<IRateCardRepository, RateCardRepository>();
         services.AddScoped<IAssignmentRepository, AssignmentRepository>();
+        services.AddScoped<ITimeEntryRepository, TimeEntryRepository>();
+        services.AddScoped<ITimesheetPeriodRepository, TimesheetPeriodRepository>();
         services.AddScoped<IAuditLog, AuditLogRepository>();
 
         return services;

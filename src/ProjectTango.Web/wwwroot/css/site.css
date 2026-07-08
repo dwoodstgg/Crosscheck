@@ -147,3 +147,92 @@ body {
   color: #6c757d;
   margin-bottom: .65rem;
 }
+
+/* ---- Timesheet grid ------------------------------------------------- */
+
+.ts-wrap {
+  overflow-x: auto;
+  border: 1px solid #e9ecef;
+  border-radius: .5rem;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+
+.ts-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: .8rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.ts-grid th,
+.ts-grid td {
+  border-bottom: 1px solid #eef0f2;
+  border-right: 1px solid #f4f5f7;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.ts-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  padding: .3rem .2rem;
+  font-weight: 600;
+  color: #495057;
+  min-width: 2.4rem;
+}
+
+.ts-grid thead th small {
+  display: block;
+  font-weight: 400;
+  color: #adb5bd;
+  font-size: .72em;
+}
+
+/* Sticky project column. */
+.ts-grid .ts-proj {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fff;
+  text-align: left;
+  padding: .4rem .7rem;
+  min-width: 15rem;
+  box-shadow: 1px 0 0 #e9ecef;
+}
+
+.ts-grid thead .ts-proj { z-index: 3; background: #f8f9fa; }
+.ts-grid .ts-proj .ts-code { font-weight: 600; color: #1f2933; }
+.ts-grid .ts-proj .ts-name { color: #868e96; font-size: .92em; }
+.ts-grid .ts-proj .form-select-sm { margin-top: .3rem; max-width: 12rem; }
+
+.ts-grid .ts-weekend { background: #fbfcfd; }
+.ts-grid .ts-total { background: #f8f9fa; font-weight: 600; color: #1f2933; min-width: 3rem; }
+
+.ts-grid tfoot td {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #1f2933;
+  padding: .3rem .2rem;
+}
+
+.ts-hours {
+  width: 2.9rem;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  padding: .35rem .1rem;
+  font-size: .8rem;
+  -moz-appearance: textfield;
+}
+
+.ts-hours::-webkit-outer-spin-button,
+.ts-hours::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ts-hours:focus { outline: 2px solid #0d6efd55; outline-offset: -2px; background: #fff; }
+.ts-hours:disabled { color: #ced4da; background: transparent; }
+.ts-cell.saving { background: #fff3cd; }
+.ts-cell.save-ok { background: #d1e7dd; transition: background .5s; }
+.ts-cell.save-err { background: #f8d7da; }
+.ts-cell.approved input { color: #0f5132; font-weight: 600; }

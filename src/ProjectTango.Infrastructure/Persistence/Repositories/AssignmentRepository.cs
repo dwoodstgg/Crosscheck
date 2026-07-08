@@ -31,6 +31,23 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         return rows.Select(row => new AssignmentSummary(ToEntity(row), row.EmployeeName!, row.DefaultRoleName)).ToList();
     }
 
+    public async Task<IReadOnlyList<EmployeeAssignment>> GetForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<AssignmentRow>(new CommandDefinition(
+            """
+            SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.start_date, a.end_date,
+                   p.code AS project_code, p.name AS project_name
+            FROM project_assignments a
+            JOIN projects p ON p.id = a.project_id
+            WHERE a.employee_id = @employeeId
+            ORDER BY p.code
+            """,
+            new { employeeId },
+            cancellationToken: cancellationToken));
+        return rows.Select(row => new EmployeeAssignment(ToEntity(row), row.ProjectCode!, row.ProjectName!)).ToList();
+    }
+
     public async Task<ProjectAssignment?> GetAsync(Guid assignmentId, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -112,5 +129,7 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         public DateOnly? EndDate { get; set; }
         public string? EmployeeName { get; set; }
         public string? DefaultRoleName { get; set; }
+        public string? ProjectCode { get; set; }
+        public string? ProjectName { get; set; }
     }
 }

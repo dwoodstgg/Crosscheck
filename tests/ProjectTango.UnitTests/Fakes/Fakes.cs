@@ -3,6 +3,7 @@ using ProjectTango.Application.Common;
 using ProjectTango.Application.Employees;
 using ProjectTango.Application.Projects;
 using ProjectTango.Application.Roles;
+using ProjectTango.Application.TimeEntries;
 using ProjectTango.Domain.Entities;
 using ProjectTango.Domain.Enums;
 
@@ -246,6 +247,12 @@ public sealed class FakeAssignmentRepository : IAssignmentRepository
             .Select(a => new AssignmentSummary(a, "employee", null))
             .ToList());
 
+    public Task<IReadOnlyList<EmployeeAssignment>> GetForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<EmployeeAssignment>>(Assignments
+            .Where(a => a.EmployeeId == employeeId)
+            .Select(a => new EmployeeAssignment(a, "GEO-000", "project"))
+            .ToList());
+
     public Task<ProjectAssignment?> GetAsync(Guid assignmentId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Assignments.FirstOrDefault(a => a.Id == assignmentId));
 
@@ -259,4 +266,73 @@ public sealed class FakeAssignmentRepository : IAssignmentRepository
     }
 
     public Task UpdateAsync(ProjectAssignment assignment, CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+public sealed class FakeTimeEntryRepository : ITimeEntryRepository
+{
+    public List<TimeEntry> Entries { get; } = [];
+
+    public Task<TimeEntry?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Entries.FirstOrDefault(e => e.Id == id));
+
+    public Task<TimeEntry?> GetByCellAsync(Guid employeeId, Guid projectId, DateOnly date, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Entries.FirstOrDefault(e =>
+            e.EmployeeId == employeeId && e.ProjectId == projectId && e.EntryDate == date));
+
+    public Task<IReadOnlyList<TimeEntry>> GetForEmployeeRangeAsync(Guid employeeId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TimeEntry>>(Entries
+            .Where(e => e.EmployeeId == employeeId && e.EntryDate >= from && e.EntryDate <= to)
+            .OrderBy(e => e.EntryDate)
+            .ToList());
+
+    public Task<IReadOnlyList<ApprovalEntry>> GetForProjectRangeAsync(Guid projectId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ApprovalEntry>>(Entries
+            .Where(e => e.ProjectId == projectId && e.EntryDate >= from && e.EntryDate <= to)
+            .Select(e => new ApprovalEntry(e, "employee", "role"))
+            .ToList());
+
+    public Task AddAsync(TimeEntry entry, CancellationToken cancellationToken = default)
+    {
+        Entries.Add(entry);
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateAsync(TimeEntry entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        Entries.RemoveAll(e => e.Id == id);
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class FakeTimesheetPeriodRepository : ITimesheetPeriodRepository
+{
+    public List<TimesheetPeriod> Periods { get; } = [];
+
+    public Task<TimesheetPeriod?> GetByStartAsync(DateOnly periodStart, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Periods.FirstOrDefault(p => p.PeriodStart == periodStart));
+
+    public Task<IReadOnlyList<TimesheetPeriod>> GetInRangeAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TimesheetPeriod>>(Periods
+            .Where(p => p.PeriodStart <= to && p.PeriodEnd >= from)
+            .OrderBy(p => p.PeriodStart)
+            .ToList());
+
+    public Task UpsertAsync(TimesheetPeriod period, CancellationToken cancellationToken = default)
+    {
+        var existing = Periods.FirstOrDefault(p => p.PeriodStart == period.PeriodStart);
+        if (existing is not null)
+        {
+            existing.Status = period.Status;
+            existing.ClosedById = period.ClosedById;
+            existing.ClosedAt = period.ClosedAt;
+        }
+        else
+        {
+            Periods.Add(period);
+        }
+
+        return Task.CompletedTask;
+    }
 }

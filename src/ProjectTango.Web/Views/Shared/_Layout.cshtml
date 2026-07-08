@@ -26,10 +26,19 @@
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
                         </li>
+                        @if (User.Identity?.IsAuthenticated == true)
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-area="" asp-controller="Timesheet" asp-action="Index">My Timesheet</a>
+                            </li>
+                        }
                         @if (User.IsInRole(ProjectTango.Domain.RoleNames.Admin) || User.IsInRole(ProjectTango.Domain.RoleNames.OperationsManager) || User.IsInRole(ProjectTango.Domain.RoleNames.ProjectManager))
                         {
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-controller="Projects" asp-action="Index">Projects</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-area="" asp-controller="Approvals" asp-action="Index">Approvals</a>
                             </li>
                         }
                         @if (User.IsInRole(ProjectTango.Domain.RoleNames.Admin) || User.IsInRole(ProjectTango.Domain.RoleNames.OperationsManager))
