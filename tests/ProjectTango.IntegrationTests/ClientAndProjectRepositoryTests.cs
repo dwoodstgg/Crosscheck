@@ -115,4 +115,51 @@ public sealed class ClientAndProjectRepositoryTests : IAsyncLifetime
         Assert.NotNull(project);
         Assert.Equal(SeedData.LeaveProjectId, project.Id);
     }
+
+    [Fact]
+    public async Task Project_billing_overrides_roundtrip_including_jsonb_address()
+    {
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            ClientId = SeedData.InternalClientId,
+            Name = "MDWFP Fisheries",
+            Code = "MDWFP-01",
+            ProjectManagerId = SeedData.AdminEmployeeId,
+            BillingContactName = "Pat Contact",
+            BillingContactEmail = "pat@mdwfp.example",
+            BillingAddress = new BillingAddress { Line1 = "1505 Eastover Dr", City = "Jackson", State = "MS", PostalCode = "39211" },
+            PaymentTermsDays = 60,
+        };
+        await _projects.AddAsync(project);
+
+        var fetched = await _projects.GetByIdAsync(project.Id);
+        Assert.NotNull(fetched);
+        Assert.Equal("Pat Contact", fetched!.BillingContactName);
+        Assert.Equal("pat@mdwfp.example", fetched.BillingContactEmail);
+        Assert.Equal(60, fetched.PaymentTermsDays);
+        Assert.Equal("Jackson", fetched.BillingAddress!.City);
+
+        // Clearing the overrides back to null (inherit client) persists as null.
+        fetched.BillingContactName = null;
+        fetched.BillingAddress = null;
+        fetched.PaymentTermsDays = null;
+        await _projects.UpdateAsync(fetched);
+
+        var cleared = await _projects.GetByIdAsync(project.Id);
+        Assert.Null(cleared!.BillingContactName);
+        Assert.Null(cleared.BillingAddress);
+        Assert.Null(cleared.PaymentTermsDays);
+    }
+
+    [Fact]
+    public async Task Client_payment_terms_may_be_null()
+    {
+        var client = new Client { Id = Guid.NewGuid(), Name = "No-terms client", PaymentTermsDays = null };
+        await _clients.AddAsync(client);
+
+        var fetched = await _clients.GetByIdAsync(client.Id);
+        Assert.NotNull(fetched);
+        Assert.Null(fetched!.PaymentTermsDays);
+    }
 }

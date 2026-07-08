@@ -30,4 +30,11 @@ public class Project
 
     /// <summary>USD only in v1; column kept for the future.</summary>
     public string Currency { get; set; } = "USD";
+
+    // Billing overrides (design decision 18). Null = inherit the client's default; effective
+    // value resolves per-field project → client → default. See ProjectBilling.Resolve.
+    public string? BillingContactName { get; set; }
+    public string? BillingContactEmail { get; set; }
+    public BillingAddress? BillingAddress { get; set; }
+    public int? PaymentTermsDays { get; set; }
 }

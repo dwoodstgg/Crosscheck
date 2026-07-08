@@ -10,8 +10,9 @@ public class Client
     public string? BillingContactEmail { get; set; }
     public BillingAddress? BillingAddress { get; set; }
 
-    /// <summary>Net terms, e.g. 30 for Net-30. Due date = issued + terms.</summary>
-    public int PaymentTermsDays { get; set; } = 30;
+    /// <summary>Default net terms, e.g. 30 for Net-30. Null = no client default; a project
+    /// supplies its own, otherwise invoicing falls back to a system default. Due = issued + terms.</summary>
+    public int? PaymentTermsDays { get; set; }
 
     /// <summary>True only for The Geospatial Group itself — owns internal non-billable
     /// projects (leave, admin time) that are never invoiced.</summary>

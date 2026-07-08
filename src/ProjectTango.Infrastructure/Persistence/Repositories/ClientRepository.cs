@@ -111,7 +111,7 @@ public class ClientRepository(NpgsqlDataSource dataSource) : IClientRepository
         string? BillingContactName,
         string? BillingContactEmail,
         string? BillingAddressJson,
-        int PaymentTermsDays,
+        int? PaymentTermsDays,
         bool IsInternal,
         bool IsActive);
 }

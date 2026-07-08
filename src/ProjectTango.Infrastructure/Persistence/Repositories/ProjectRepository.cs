@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dapper;
 using Npgsql;
 using ProjectTango.Application.Projects;
@@ -8,10 +9,14 @@ namespace ProjectTango.Infrastructure.Persistence.Repositories;
 
 public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private const string SelectColumns =
         """
         SELECT p.id, p.client_id, p.name, p.code, p.status, p.closed_at, p.closed_by AS closed_by_id,
-               p.project_manager_id, p.start_date, p.end_date, p.currency
+               p.project_manager_id, p.start_date, p.end_date, p.currency,
+               p.billing_contact_name, p.billing_contact_email,
+               p.billing_address::text AS billing_address_json, p.payment_terms_days
         FROM projects p
         """;
 
@@ -22,6 +27,8 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
             """
             SELECT p.id, p.client_id, p.name, p.code, p.status, p.closed_at, p.closed_by AS closed_by_id,
                    p.project_manager_id, p.start_date, p.end_date, p.currency,
+                   p.billing_contact_name, p.billing_contact_email,
+                   p.billing_address::text AS billing_address_json, p.payment_terms_days,
                    c.name AS client_name, e.display_name AS project_manager_name
             FROM projects p
             JOIN clients c ON c.id = p.client_id
@@ -57,21 +64,14 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO projects (id, client_id, name, code, status, project_manager_id, start_date, end_date, currency)
-            VALUES (@Id, @ClientId, @Name, @Code, @status, @ProjectManagerId, @StartDate, @EndDate, @Currency)
+            INSERT INTO projects
+                (id, client_id, name, code, status, project_manager_id, start_date, end_date, currency,
+                 billing_contact_name, billing_contact_email, billing_address, payment_terms_days)
+            VALUES
+                (@Id, @ClientId, @Name, @Code, @status, @ProjectManagerId, @StartDate, @EndDate, @Currency,
+                 @BillingContactName, @BillingContactEmail, @billingAddressJson::jsonb, @PaymentTermsDays)
             """,
-            new
-            {
-                project.Id,
-                project.ClientId,
-                project.Name,
-                project.Code,
-                status = DbEnum.ToDb(project.Status),
-                project.ProjectManagerId,
-                project.StartDate,
-                project.EndDate,
-                project.Currency,
-            },
+            InsertParams(project),
             cancellationToken: cancellationToken));
     }
 
@@ -86,19 +86,14 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
                 code = @Code,
                 project_manager_id = @ProjectManagerId,
                 start_date = @StartDate,
-                end_date = @EndDate
+                end_date = @EndDate,
+                billing_contact_name = @BillingContactName,
+                billing_contact_email = @BillingContactEmail,
+                billing_address = @billingAddressJson::jsonb,
+                payment_terms_days = @PaymentTermsDays
             WHERE id = @Id
             """,
-            new
-            {
-                project.Id,
-                project.ClientId,
-                project.Name,
-                project.Code,
-                project.ProjectManagerId,
-                project.StartDate,
-                project.EndDate,
-            },
+            InsertParams(project),
             cancellationToken: cancellationToken));
     }
 
@@ -110,6 +105,25 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
             new { projectId, status = DbEnum.ToDb(status) },
             cancellationToken: cancellationToken));
     }
+
+    private static object InsertParams(Project project) => new
+    {
+        project.Id,
+        project.ClientId,
+        project.Name,
+        project.Code,
+        status = DbEnum.ToDb(project.Status),
+        project.ProjectManagerId,
+        project.StartDate,
+        project.EndDate,
+        project.Currency,
+        project.BillingContactName,
+        project.BillingContactEmail,
+        billingAddressJson = project.BillingAddress is null
+            ? null
+            : JsonSerializer.Serialize(project.BillingAddress, JsonOptions),
+        project.PaymentTermsDays,
+    };
 
     private static Project ToProject(ProjectRow row) => new()
     {
@@ -124,6 +138,12 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         StartDate = row.StartDate,
         EndDate = row.EndDate,
         Currency = row.Currency,
+        BillingContactName = row.BillingContactName,
+        BillingContactEmail = row.BillingContactEmail,
+        BillingAddress = row.BillingAddressJson is null
+            ? null
+            : JsonSerializer.Deserialize<BillingAddress>(row.BillingAddressJson, JsonOptions),
+        PaymentTermsDays = row.PaymentTermsDays,
     };
 
     // Property-based (not a positional record): Dapper materializes via setters, which
@@ -142,6 +162,10 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         public DateOnly? StartDate { get; set; }
         public DateOnly? EndDate { get; set; }
         public string Currency { get; set; } = null!;
+        public string? BillingContactName { get; set; }
+        public string? BillingContactEmail { get; set; }
+        public string? BillingAddressJson { get; set; }
+        public int? PaymentTermsDays { get; set; }
         public string? ClientName { get; set; }
         public string? ProjectManagerName { get; set; }
     }

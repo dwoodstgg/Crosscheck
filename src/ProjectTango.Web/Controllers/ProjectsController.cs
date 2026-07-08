@@ -47,7 +47,7 @@ public class ProjectsController(
         {
             await projectAdmin.CreateAsync(
                 model.ClientId!.Value, model.Name!, model.Code!, model.ProjectManagerId!.Value,
-                model.StartDate, model.EndDate, cancellationToken);
+                model.StartDate, model.EndDate, model.ToBillingInput(), cancellationToken);
             return RedirectToAction(nameof(Index));
         }
         catch (DomainException ex)
@@ -78,7 +78,7 @@ public class ProjectsController(
         {
             await projectAdmin.UpdateAsync(
                 id, model.ClientId!.Value, model.Name!, model.Code!, model.ProjectManagerId!.Value,
-                model.StartDate, model.EndDate, cancellationToken);
+                model.StartDate, model.EndDate, model.ToBillingInput(), cancellationToken);
             return RedirectToAction(nameof(Index));
         }
         catch (DomainException ex)

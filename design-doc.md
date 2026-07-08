@@ -198,12 +198,14 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 |---|---|---|
 | id | uuid PK | |
 | name | text | |
-| billing_contact_name / email | text | |
-| billing_address | jsonb | |
-| payment_terms_days | int | e.g., 30 for Net-30 |
+| billing_contact_name / email | text null | **Default** billing contact — a project may override (see below) |
+| billing_address | jsonb null | Default billing address; project may override |
+| payment_terms_days | int null | Default terms, e.g., 30 for Net-30; project may override |
 | is_active | boolean | |
 
 > One seeded internal client — **The Geospatial Group** — owns internal non-billable projects (leave, admin time). Never invoiced; keeps daily totals reconcilable and feeds utilization reporting.
+
+> **Billing is per project, with the client as a fallback default.** A client works with multiple departments/contacts (e.g., three concurrent MDWFP projects, three different contacts), so the authoritative billing contact, address, and payment terms live on the **project** (all nullable). A null project field inherits the client's value; the effective value for invoicing resolves **field-by-field as project → client → default** (payment terms default to 30 when neither is set). Client-level fields are pure defaults, not requirements.
 
 **projects**
 | Column | Type | Notes |
@@ -217,6 +219,9 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | project_manager_id | uuid FK → employees | |
 | start_date / end_date | date | |
 | currency | char(3) | USD default |
+| billing_contact_name / email | text null | Overrides the client's default contact when set |
+| billing_address | jsonb null | Overrides the client's default address when set |
+| payment_terms_days | int null | Overrides the client's default terms when set |
 
 **project_rate_cards** — the heart of "rates configurable per role at the project level"
 | Column | Type | Notes |
@@ -481,6 +486,7 @@ Mobile app (.NET MAUI or React Native — time entry + approvals on the go), des
 15. **Invoice numbering** ✅ Runs continuously across years; YYYY segment reflects issue date, NNNN never resets.
 16. **Workbook sheet roles** ✅ Per month: hours are entered on the calendar sheet; the `-DESC` sheet receives rolled-up hours and holds the typed work descriptions. Import takes hours from the calendar, descriptions from `-DESC`; extra client-specific calendars are skipped.
 17. **Data access** ✅ **Dapper + Npgsql, no ORM** (revised from EF Core). Schema lives in numbered plain-SQL scripts run by DbUp; enums stored as text with CHECK constraints; snake_case naming per §5.
+18. **Billing contact & terms location** ✅ (revised 2026-07-08) Per **project**, not client. Billing contact, address, and payment terms live on the project (all nullable); the client keeps the same fields as **defaults**. Effective value resolves field-by-field project → client → default (terms default 30). Motivated by one client having several concurrent projects with different departmental contacts.
 
 ### Still open
 

@@ -18,7 +18,7 @@ public class ClientFormViewModel
 
     [Range(0, 365)]
     [Display(Name = "Payment terms (days)")]
-    public int PaymentTermsDays { get; set; } = 30;
+    public int? PaymentTermsDays { get; set; } = 30;
 
     [Display(Name = "Address line 1")]
     public string? AddressLine1 { get; set; }

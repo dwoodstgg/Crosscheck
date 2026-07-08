@@ -33,6 +33,7 @@ public class ProjectDashboard
 {
     public required Project Project { get; init; }
     public required string ClientName { get; init; }
+    public required BillingProfile Billing { get; init; }
     public required DashboardTotals Totals { get; init; }
     public required IReadOnlyList<RoleBurn> ByRole { get; init; }
     public required IReadOnlyList<PersonBurn> ByPerson { get; init; }
@@ -101,6 +102,7 @@ public class ProjectDashboardService(
         {
             Project = project,
             ClientName = client?.Name ?? "—",
+            Billing = ProjectBilling.Resolve(project, client),
             Totals = totals,
             ByRole = byRole,
             ByPerson = byPerson,

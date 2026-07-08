@@ -24,7 +24,7 @@ public class ClientAdminService(ICurrentUser currentUser, IClientRepository clie
         string? billingContactName,
         string? billingContactEmail,
         BillingAddress? billingAddress,
-        int paymentTermsDays,
+        int? paymentTermsDays,
         CancellationToken cancellationToken = default)
     {
         var adminOverride = currentUser.RequireAny(RoleNames.OperationsManager);
@@ -53,7 +53,7 @@ public class ClientAdminService(ICurrentUser currentUser, IClientRepository clie
         string? billingContactName,
         string? billingContactEmail,
         BillingAddress? billingAddress,
-        int paymentTermsDays,
+        int? paymentTermsDays,
         CancellationToken cancellationToken = default)
     {
         var adminOverride = currentUser.RequireAny(RoleNames.OperationsManager);

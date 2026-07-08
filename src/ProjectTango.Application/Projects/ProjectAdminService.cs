@@ -60,7 +60,8 @@ public class ProjectAdminService(
 
     public async Task<Project> CreateAsync(
         Guid clientId, string name, string code, Guid projectManagerId,
-        DateOnly? startDate, DateOnly? endDate, CancellationToken cancellationToken = default)
+        DateOnly? startDate, DateOnly? endDate, ProjectBillingInput? billing = null,
+        CancellationToken cancellationToken = default)
     {
         var adminOverride = currentUser.RequireAny(RoleNames.OperationsManager, RoleNames.ProjectManager);
 
@@ -82,6 +83,7 @@ public class ProjectAdminService(
             StartDate = startDate,
             EndDate = endDate,
         };
+        ApplyBilling(project, billing);
         await projects.AddAsync(project, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
@@ -93,7 +95,8 @@ public class ProjectAdminService(
 
     public async Task UpdateAsync(
         Guid projectId, Guid clientId, string name, string code, Guid projectManagerId,
-        DateOnly? startDate, DateOnly? endDate, CancellationToken cancellationToken = default)
+        DateOnly? startDate, DateOnly? endDate, ProjectBillingInput? billing = null,
+        CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new DomainException("Unknown project.");
@@ -115,6 +118,7 @@ public class ProjectAdminService(
         project.ProjectManagerId = projectManagerId;
         project.StartDate = startDate;
         project.EndDate = endDate;
+        ApplyBilling(project, billing);
         await projects.UpdateAsync(project, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
@@ -148,6 +152,24 @@ public class ProjectAdminService(
     }
 
     private bool RequireCanManage(Project project) => currentUser.RequireCanManage(project);
+
+    /// <summary>Copies the project's billing overrides. Null/blank fields stay null so they
+    /// inherit the client's default (design decision 18). Terms are validated non-negative.</summary>
+    private static void ApplyBilling(Project project, ProjectBillingInput? billing)
+    {
+        if (billing?.PaymentTermsDays is < 0)
+        {
+            throw new DomainException("Payment terms cannot be negative.");
+        }
+
+        project.BillingContactName = Normalize(billing?.ContactName);
+        project.BillingContactEmail = Normalize(billing?.ContactEmail);
+        project.BillingAddress = billing?.Address;
+        project.PaymentTermsDays = billing?.PaymentTermsDays;
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private async Task ValidateAsync(
         Guid clientId, Guid projectManagerId, DateOnly? startDate, DateOnly? endDate, CancellationToken cancellationToken)
