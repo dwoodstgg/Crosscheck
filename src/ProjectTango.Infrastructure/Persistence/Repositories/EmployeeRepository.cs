@@ -10,6 +10,86 @@ public class EmployeeRepository(NpgsqlDataSource dataSource) : IEmployeeReposito
     private const string SelectColumns =
         "SELECT id, entra_oid, email, display_name, employment_type, is_active, created_at, updated_at FROM employees";
 
+    public async Task<Employee?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<Employee>(new CommandDefinition(
+            $"{SelectColumns} WHERE id = @id",
+            new { id },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task<IReadOnlyList<EmployeeSummary>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+
+        var all = (await connection.QueryAsync<Employee>(new CommandDefinition(
+            $"{SelectColumns} ORDER BY display_name",
+            cancellationToken: cancellationToken))).ToList();
+
+        var roleRows = await connection.QueryAsync<(Guid EmployeeId, string RoleName)>(new CommandDefinition(
+            """
+            SELECT er.employee_id, r.name FROM employee_roles er
+            JOIN roles r ON r.id = er.role_id
+            ORDER BY r.name
+            """,
+            cancellationToken: cancellationToken));
+
+        var rolesByEmployee = roleRows
+            .GroupBy(r => r.EmployeeId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(r => r.RoleName).ToList());
+
+        return all
+            .Select(e => new EmployeeSummary(e, rolesByEmployee.GetValueOrDefault(e.Id, [])))
+            .ToList();
+    }
+
+    public async Task SetActiveAsync(Guid employeeId, bool isActive, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE employees SET is_active = @isActive, updated_at = now() WHERE id = @employeeId",
+            new { employeeId, isActive },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task<bool> GrantRoleAsync(Guid employeeId, Guid roleId, Guid grantedBy, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO employee_roles (employee_id, role_id, granted_by)
+            VALUES (@employeeId, @roleId, @grantedBy)
+            ON CONFLICT (employee_id, role_id) DO NOTHING
+            """,
+            new { employeeId, roleId, grantedBy },
+            cancellationToken: cancellationToken));
+        return affected > 0;
+    }
+
+    public async Task<bool> RevokeRoleAsync(Guid employeeId, Guid roleId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM employee_roles WHERE employee_id = @employeeId AND role_id = @roleId",
+            new { employeeId, roleId },
+            cancellationToken: cancellationToken));
+        return affected > 0;
+    }
+
+    public async Task<int> CountActiveAdminsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT count(DISTINCT e.id) FROM employees e
+            JOIN employee_roles er ON er.employee_id = e.id
+            JOIN roles r ON r.id = er.role_id
+            WHERE e.is_active AND r.is_system_admin
+            """,
+            cancellationToken: cancellationToken));
+    }
+
     public async Task<Employee?> GetByEntraOidAsync(string entraOid, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);

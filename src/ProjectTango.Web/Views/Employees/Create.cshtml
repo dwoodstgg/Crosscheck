@@ -1,0 +1,46 @@
+@using ProjectTango.Domain.Enums
+@model CreateEmployeeViewModel
+@{
+    ViewData["Title"] = "New Employee";
+}
+
+<h1>New Employee</h1>
+<p class="text-muted">
+    Creates the record ahead of sign-in — it links to their Entra identity automatically
+    the first time they sign in with this email. New employees have no roles until granted.
+</p>
+
+<div class="row">
+    <div class="col-md-6">
+        <form asp-action="Create">
+            <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+            <div class="mb-3">
+                <label asp-for="Email" class="form-label"></label>
+                <input asp-for="Email" class="form-control" placeholder="name@thegeospatialgroup.com" />
+                <span asp-validation-for="Email" class="text-danger"></span>
+            </div>
+
+            <div class="mb-3">
+                <label asp-for="DisplayName" class="form-label"></label>
+                <input asp-for="DisplayName" class="form-control" />
+                <span asp-validation-for="DisplayName" class="text-danger"></span>
+            </div>
+
+            <div class="mb-3">
+                <label asp-for="EmploymentType" class="form-label"></label>
+                <select asp-for="EmploymentType" class="form-select">
+                    <option value="@EmploymentType.Employee">Employee (W-2)</option>
+                    <option value="@EmploymentType.Subcontractor">Subcontractor (1099)</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Create</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Cancel</a>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

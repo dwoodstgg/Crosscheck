@@ -1,0 +1,89 @@
+@using ProjectTango.Domain.Enums
+@model EmployeeDetailsViewModel
+@{
+    var e = Model.Summary.Employee;
+    var held = Model.Summary.RoleNames;
+    ViewData["Title"] = e.DisplayName;
+}
+
+@if (TempData["Error"] is string error)
+{
+    <div class="alert alert-danger alert-dismissible" role="alert">
+        @error
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">@e.DisplayName</h1>
+    <form asp-action="SetActive" asp-route-id="@e.Id" method="post">
+        <input type="hidden" name="isActive" value="@((!e.IsActive).ToString())" />
+        <button type="submit" class="btn @(e.IsActive ? "btn-outline-danger" : "btn-outline-success")">
+            @(e.IsActive ? "Deactivate" : "Reactivate")
+        </button>
+    </form>
+</div>
+
+<dl class="row">
+    <dt class="col-sm-3">Email</dt>
+    <dd class="col-sm-9">@e.Email</dd>
+
+    <dt class="col-sm-3">Employment type</dt>
+    <dd class="col-sm-9">@(e.EmploymentType == EmploymentType.Subcontractor ? "1099 Subcontractor" : "Employee (W-2)")</dd>
+
+    <dt class="col-sm-3">Status</dt>
+    <dd class="col-sm-9">
+        <span class="badge @(e.IsActive ? "text-bg-success" : "text-bg-secondary")">@(e.IsActive ? "Active" : "Inactive")</span>
+    </dd>
+
+    <dt class="col-sm-3">Entra ID</dt>
+    <dd class="col-sm-9">
+        @if (e.EntraOid is null)
+        {
+            <span class="badge text-bg-warning">Not linked</span>
+            <span class="text-muted">— links automatically on first sign-in</span>
+        }
+        else
+        {
+            <span class="badge text-bg-success">Linked</span> <code>@e.EntraOid</code>
+        }
+    </dd>
+</dl>
+
+<h4>Roles</h4>
+<p class="text-muted">Role changes take effect at the person's next sign-in.</p>
+<table class="table w-auto align-middle">
+    <tbody>
+        @foreach (var role in Model.AllRoles)
+        {
+            var has = held.Contains(role.Name);
+            <tr>
+                <td class="pe-4">
+                    @role.Name
+                    @if (role.IsSystemAdmin)
+                    {
+                        <span class="badge text-bg-danger ms-1">system</span>
+                    }
+                </td>
+                <td>
+                    @if (has)
+                    {
+                        <form asp-action="RevokeRole" asp-route-id="@e.Id" method="post" class="d-inline">
+                            <input type="hidden" name="roleId" value="@role.Id" />
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Revoke</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <form asp-action="GrantRole" asp-route-id="@e.Id" method="post" class="d-inline">
+                            <input type="hidden" name="roleId" value="@role.Id" />
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Grant</button>
+                        </form>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<a class="btn btn-outline-secondary" asp-action="Index">Back to employees</a>

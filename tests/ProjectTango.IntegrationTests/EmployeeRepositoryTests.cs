@@ -80,4 +80,56 @@ public sealed class EmployeeRepositoryTests : IAsyncLifetime
 
         Assert.Equal([RoleNames.Admin], roles);
     }
+
+    [Fact]
+    public async Task GetAll_includes_role_names()
+    {
+        var all = await _repository.GetAllAsync();
+
+        var don = Assert.Single(all, s => s.Employee.Id == SeedData.AdminEmployeeId);
+        Assert.Contains(RoleNames.Admin, don.RoleNames);
+    }
+
+    [Fact]
+    public async Task Grant_and_revoke_role_roundtrip()
+    {
+        var granted = await _repository.GrantRoleAsync(
+            SeedData.AdminEmployeeId, SeedData.DeveloperRoleId, SeedData.AdminEmployeeId);
+        Assert.True(granted);
+
+        var duplicate = await _repository.GrantRoleAsync(
+            SeedData.AdminEmployeeId, SeedData.DeveloperRoleId, SeedData.AdminEmployeeId);
+        Assert.False(duplicate);
+
+        Assert.Contains(RoleNames.Developer, await _repository.GetRoleNamesAsync(SeedData.AdminEmployeeId));
+
+        Assert.True(await _repository.RevokeRoleAsync(SeedData.AdminEmployeeId, SeedData.DeveloperRoleId));
+        Assert.False(await _repository.RevokeRoleAsync(SeedData.AdminEmployeeId, SeedData.DeveloperRoleId));
+    }
+
+    [Fact]
+    public async Task CountActiveAdmins_reflects_seed_and_deactivation()
+    {
+        Assert.Equal(1, await _repository.CountActiveAdminsAsync());
+
+        await _repository.SetActiveAsync(SeedData.AdminEmployeeId, false);
+        Assert.Equal(0, await _repository.CountActiveAdminsAsync());
+
+        await _repository.SetActiveAsync(SeedData.AdminEmployeeId, true);
+        Assert.Equal(1, await _repository.CountActiveAdminsAsync());
+    }
+
+    [Fact]
+    public async Task AuditLog_writes_jsonb_details()
+    {
+        var audit = new AuditLogRepository(_dataSource);
+
+        await audit.WriteAsync(new Application.Common.AuditEvent(
+            SeedData.AdminEmployeeId, "role.granted", "employee", SeedData.AdminEmployeeId, new { Role = "Developer" }));
+
+        await using var connection = await _dataSource.OpenConnectionAsync();
+        var role = await connection.ExecuteScalarAsync<string>(
+            "SELECT details->>'role' FROM audit_log WHERE action = 'role.granted'");
+        Assert.Equal("Developer", role);
+    }
 }

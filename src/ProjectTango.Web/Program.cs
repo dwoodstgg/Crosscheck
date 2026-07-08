@@ -5,10 +5,12 @@ using Microsoft.Identity.Web;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.Identity.Web.UI;
 using ProjectTango.Application;
+using ProjectTango.Application.Common;
 using ProjectTango.Application.Employees;
 using ProjectTango.Infrastructure;
 using ProjectTango.Infrastructure.Persistence;
 using ProjectTango.Web;
+using ProjectTango.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -65,6 +67,8 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 
 builder.Services.AddControllersWithViews()
     .AddMicrosoftIdentityUI();

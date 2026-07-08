@@ -2,6 +2,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using ProjectTango.Application.Common;
 using ProjectTango.Application.Employees;
 using ProjectTango.Application.Roles;
 using ProjectTango.Infrastructure.Persistence.Repositories;
@@ -22,6 +23,7 @@ public static class DependencyInjection
 
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IEmployeeRepository, EmployeeRepository>();
+        services.AddScoped<IAuditLog, AuditLogRepository>();
 
         return services;
     }
