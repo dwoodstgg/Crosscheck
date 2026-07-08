@@ -128,6 +128,10 @@
 
         const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
+        // Round to 2 decimals and drop trailing zeros. Number.toString never eats a
+        // whole number's own zero (10 -> "10"), unlike a trailing-zero regex would.
+        const show = (v, zero) => { const n = Math.round(num(v) * 100) / 100; return n ? String(n) : zero; };
+
         function recalc() {
             const cols = {};
             let grand = 0;
@@ -139,15 +143,14 @@
                     const day = inp.closest('.ts-cell').dataset.date.slice(-2);
                     cols[day] = (cols[day] || 0) + h;
                 });
-                tr.querySelector('.ts-row-total').textContent = rowTotal ? rowTotal.toFixed(2).replace(/\.?0+$/, '') : '0';
+                tr.querySelector('.ts-row-total').textContent = show(rowTotal, '0');
                 grand += rowTotal;
             });
             grid.querySelectorAll('.ts-col-total').forEach(td => {
                 const day = String(td.dataset.day).padStart(2, '0');
-                const v = cols[day] || 0;
-                td.textContent = v ? v.toFixed(2).replace(/\.?0+$/, '') : '0';
+                td.textContent = show(cols[day] || 0, '0');
             });
-            document.getElementById('ts-grand-total').textContent = grand ? grand.toFixed(2).replace(/\.?0+$/, '') : '0';
+            document.getElementById('ts-grand-total').textContent = show(grand, '0');
         }
 
         function flash(cell, cls) {
@@ -173,7 +176,7 @@
                 });
                 const data = await res.json();
                 if (data.ok) {
-                    input.value = data.cleared ? '' : (data.hours ? String(data.hours).replace(/\.?0+$/, '') : '');
+                    input.value = data.cleared ? '' : show(data.hours, '');
                     input.dataset.role = billingRoleId;
                     errorBox.classList.add('d-none');
                     flash(cell, 'save-ok');
