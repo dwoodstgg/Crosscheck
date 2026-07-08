@@ -1,8 +1,6 @@
 @model TimesheetGridViewModel
 @{
-    var who = User.GetDisplayName();
-    var pageTitle = string.IsNullOrWhiteSpace(who) ? "Timesheet" : $"{who} — Timesheet";
-    ViewData["Title"] = pageTitle;
+    ViewData["Title"] = "Timesheet";
     ViewData["ContainerClass"] = "container-fluid px-md-4";
     var today = DateOnly.FromDateTime(DateTime.Today);
     string Fmt(decimal h) => h == 0 ? "" : h.ToString("0.##");
@@ -10,7 +8,7 @@
 
 <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
     <div class="d-flex align-items-baseline gap-2">
-        <h1 class="mb-0 h3">@pageTitle</h1>
+        <h1 class="mb-0 h3">Timesheet</h1>
         <span class="text-muted">@Model.RangeLabel</span>
     </div>
     <div class="d-flex gap-2">
