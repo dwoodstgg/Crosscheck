@@ -9,7 +9,7 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
 {
     private const string SelectColumns =
         """
-        SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.start_date, a.end_date
+        SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.end_date
         FROM project_assignments a
         """;
 
@@ -18,8 +18,12 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<AssignmentRow>(new CommandDefinition(
             """
-            SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.start_date, a.end_date,
-                   e.display_name AS employee_name, r.display_name AS default_role_name
+            SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.end_date,
+                   e.display_name AS employee_name, r.display_name AS default_role_name,
+                   EXISTS (
+                       SELECT 1 FROM time_entries te
+                       WHERE te.project_id = a.project_id AND te.employee_id = a.employee_id
+                   ) AS has_time_entries
             FROM project_assignments a
             JOIN employees e ON e.id = a.employee_id
             LEFT JOIN roles r ON r.id = a.default_billing_role_id
@@ -28,7 +32,7 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
             """,
             new { projectId },
             cancellationToken: cancellationToken));
-        return rows.Select(row => new AssignmentSummary(ToEntity(row), row.EmployeeName!, row.DefaultRoleName)).ToList();
+        return rows.Select(row => new AssignmentSummary(ToEntity(row), row.EmployeeName!, row.DefaultRoleName, row.HasTimeEntries)).ToList();
     }
 
     public async Task<IReadOnlyList<EmployeeAssignment>> GetForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
@@ -36,7 +40,7 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<AssignmentRow>(new CommandDefinition(
             """
-            SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.start_date, a.end_date,
+            SELECT a.id, a.project_id, a.employee_id, a.default_billing_role_id, a.end_date,
                    p.code AS project_code, p.name AS project_name, c.name AS client_name
             FROM project_assignments a
             JOIN projects p ON p.id = a.project_id
@@ -69,13 +73,27 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         return row is null ? null : ToEntity(row);
     }
 
+    public async Task<bool> HasTimeEntriesAsync(Guid projectId, Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM time_entries
+                WHERE project_id = @projectId AND employee_id = @employeeId
+            )
+            """,
+            new { projectId, employeeId },
+            cancellationToken: cancellationToken));
+    }
+
     public async Task AddAsync(ProjectAssignment assignment, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO project_assignments (id, project_id, employee_id, default_billing_role_id, start_date, end_date)
-            VALUES (@Id, @ProjectId, @EmployeeId, @DefaultBillingRoleId, @StartDate, @EndDate)
+            INSERT INTO project_assignments (id, project_id, employee_id, default_billing_role_id, end_date)
+            VALUES (@Id, @ProjectId, @EmployeeId, @DefaultBillingRoleId, @EndDate)
             """,
             new
             {
@@ -83,7 +101,6 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
                 assignment.ProjectId,
                 assignment.EmployeeId,
                 assignment.DefaultBillingRoleId,
-                assignment.StartDate,
                 assignment.EndDate,
             },
             cancellationToken: cancellationToken));
@@ -96,7 +113,6 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
             """
             UPDATE project_assignments SET
                 default_billing_role_id = @DefaultBillingRoleId,
-                start_date = @StartDate,
                 end_date = @EndDate
             WHERE id = @Id
             """,
@@ -104,9 +120,17 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
             {
                 assignment.Id,
                 assignment.DefaultBillingRoleId,
-                assignment.StartDate,
                 assignment.EndDate,
             },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task DeleteAsync(Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM project_assignments WHERE id = @assignmentId",
+            new { assignmentId },
             cancellationToken: cancellationToken));
     }
 
@@ -116,7 +140,6 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         ProjectId = row.ProjectId,
         EmployeeId = row.EmployeeId,
         DefaultBillingRoleId = row.DefaultBillingRoleId,
-        StartDate = row.StartDate,
         EndDate = row.EndDate,
     };
 
@@ -126,10 +149,10 @@ public class AssignmentRepository(NpgsqlDataSource dataSource) : IAssignmentRepo
         public Guid ProjectId { get; set; }
         public Guid EmployeeId { get; set; }
         public Guid? DefaultBillingRoleId { get; set; }
-        public DateOnly? StartDate { get; set; }
         public DateOnly? EndDate { get; set; }
         public string? EmployeeName { get; set; }
         public string? DefaultRoleName { get; set; }
+        public bool HasTimeEntries { get; set; }
         public string? ProjectCode { get; set; }
         public string? ProjectName { get; set; }
         public string? ClientName { get; set; }

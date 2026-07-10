@@ -11,7 +11,8 @@ public class Project
 
     public required string Name { get; set; }
 
-    /// <summary>Short unique code for invoices/reports, e.g. GEO-014 or INT-LEAVE.</summary>
+    /// <summary>Short code for invoices/reports, e.g. GEO-014 or INT-LEAVE. Unique per
+    /// client (not globally) — the same code may recur across different clients.</summary>
     public required string Code { get; set; }
 
     /// <summary>Status changes are always explicit user actions — never automatic

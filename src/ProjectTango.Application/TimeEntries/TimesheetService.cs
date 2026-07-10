@@ -37,7 +37,7 @@ public class TimesheetService(
         // has entries on this month (so historical rows never disappear).
         var myAssignments = await assignments.GetForEmployeeAsync(me, cancellationToken);
         var projects = myAssignments
-            .Where(a => Overlaps(a.Assignment, from, to) || projectsWithEntries.Contains(a.Assignment.ProjectId))
+            .Where(a => Overlaps(a.Assignment, from) || projectsWithEntries.Contains(a.Assignment.ProjectId))
             .Select(a => new TimesheetProject(a.Assignment.ProjectId, a.ProjectCode, a.ProjectName, a.ClientName, a.Assignment.DefaultBillingRoleId))
             .DistinctBy(p => p.ProjectId)
             .OrderBy(p => p.Code)
@@ -52,6 +52,8 @@ public class TimesheetService(
         return new MyMonthTimesheet { Projects = projects, Entries = monthEntries, BillableRoles = billableRoles };
     }
 
-    private static bool Overlaps(ProjectAssignment a, DateOnly from, DateOnly to) =>
-        (a.StartDate is null || a.StartDate <= to) && (a.EndDate is null || a.EndDate >= from);
+    // Active assignments always show; one removed mid-window still shows that window (its
+    // EndDate falls on/after the window start). Earlier windows surface via logged entries.
+    private static bool Overlaps(ProjectAssignment a, DateOnly from) =>
+        a.EndDate is null || a.EndDate >= from;
 }

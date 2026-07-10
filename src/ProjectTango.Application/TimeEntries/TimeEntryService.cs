@@ -58,7 +58,7 @@ public class TimeEntryService(
             ?? throw new DomainException("Unknown project.");
         RequireProjectAcceptsTime(project);
         await RequireOpenWindowAsync(date, cancellationToken);
-        await RequireActiveAssignmentAsync(project.Id, ownerId, date, cancellationToken);
+        await RequireActiveAssignmentAsync(project.Id, ownerId, cancellationToken);
 
         var role = await roles.GetByIdAsync(billingRoleId, cancellationToken)
             ?? throw new DomainException("Unknown billing role.");
@@ -114,7 +114,7 @@ public class TimeEntryService(
 
     /// <summary>Auto-approves the entry on save — the small-shop default that removes the manual
     /// approval step. Approval is a billing decision, so a billable entry can only auto-approve
-    /// once a rate card covers its (project, billing role, date) (design rule 3); until then it
+    /// once a rate card covers its (project, billing role) (design rule 3); until then it
     /// stays <c>open</c> and shows up in the approval queue. Non-billable (internal/leave) time
     /// always auto-approves. The manual path (<see cref="ApprovalService"/>) stays available for
     /// adjusting hours_billed (worked 8, bill 6) or returning an entry to open.</summary>
@@ -122,7 +122,7 @@ public class TimeEntryService(
     {
         if (entry.IsBillable)
         {
-            var rate = await rateCards.ResolveAsync(entry.ProjectId, entry.BillingRoleId, entry.EntryDate, cancellationToken);
+            var rate = await rateCards.ResolveAsync(entry.ProjectId, entry.BillingRoleId, cancellationToken);
             if (rate is null)
             {
                 entry.Status = TimeEntryStatus.Open;
@@ -190,12 +190,12 @@ public class TimeEntryService(
         }
     }
 
-    private async Task RequireActiveAssignmentAsync(Guid projectId, Guid employeeId, DateOnly date, CancellationToken cancellationToken)
+    private async Task RequireActiveAssignmentAsync(Guid projectId, Guid employeeId, CancellationToken cancellationToken)
     {
         var assignment = await assignments.GetByProjectAndEmployeeAsync(projectId, employeeId, cancellationToken);
-        if (assignment is null || !assignment.IsActiveOn(date))
+        if (assignment is null || !assignment.IsActive)
         {
-            throw new DomainException("Time can only be logged on a project the employee is actively assigned to on that date.");
+            throw new DomainException("Time can only be logged on a project the employee is assigned to.");
         }
     }
 

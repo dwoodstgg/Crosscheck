@@ -52,7 +52,6 @@ public class TimeEntryServiceTests
             Id = Guid.NewGuid(),
             ProjectId = _project.Id,
             EmployeeId = _currentUser.EmployeeId!.Value,
-            StartDate = new DateOnly(2026, 1, 1),
         });
 
         // A rate card covers (project, Developer) so billable entries auto-approve on save.
@@ -62,7 +61,6 @@ public class TimeEntryServiceTests
             ProjectId = _project.Id,
             RoleId = _developer.Id,
             HourlyRate = 150m,
-            EffectiveFrom = new DateOnly(2026, 1, 1),
         });
     }
 
@@ -137,7 +135,7 @@ public class TimeEntryServiceTests
 
         var ex = await Assert.ThrowsAsync<DomainException>(() =>
             _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, null));
-        Assert.Contains("actively assigned", ex.Message);
+        Assert.Contains("assigned to", ex.Message);
     }
 
     [Fact]

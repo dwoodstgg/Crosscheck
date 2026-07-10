@@ -45,7 +45,6 @@ public class ApprovalServiceTests
             ProjectId = _project.Id,
             RoleId = _developer.Id,
             HourlyRate = 150m,
-            EffectiveFrom = new DateOnly(2026, 1, 1),
         });
     }
 

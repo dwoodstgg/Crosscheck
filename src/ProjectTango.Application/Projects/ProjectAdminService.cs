@@ -68,9 +68,9 @@ public class ProjectAdminService(
         await ValidateAsync(clientId, projectManagerId, startDate, endDate, cancellationToken);
 
         code = code.Trim().ToUpperInvariant();
-        if (await projects.GetByCodeAsync(code, cancellationToken) is not null)
+        if (await projects.GetByClientAndCodeAsync(clientId, code, cancellationToken) is not null)
         {
-            throw new DomainException($"Project code {code} is already in use.");
+            throw new DomainException($"Project code {code} is already in use for this client.");
         }
 
         var project = new Project
@@ -106,10 +106,10 @@ public class ProjectAdminService(
         await ValidateAsync(clientId, projectManagerId, startDate, endDate, cancellationToken);
 
         code = code.Trim().ToUpperInvariant();
-        var byCode = await projects.GetByCodeAsync(code, cancellationToken);
+        var byCode = await projects.GetByClientAndCodeAsync(clientId, code, cancellationToken);
         if (byCode is not null && byCode.Id != projectId)
         {
-            throw new DomainException($"Project code {code} is already in use.");
+            throw new DomainException($"Project code {code} is already in use for this client.");
         }
 
         project.ClientId = clientId;

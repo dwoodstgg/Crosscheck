@@ -196,6 +196,10 @@ public sealed class FakeProjectRepository : IProjectRepository
         Task.FromResult(Projects.FirstOrDefault(p =>
             string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase)));
 
+    public Task<Project?> GetByClientAndCodeAsync(Guid clientId, string code, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Projects.FirstOrDefault(p =>
+            p.ClientId == clientId && string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase)));
+
     public Task AddAsync(Project project, CancellationToken cancellationToken = default)
     {
         Projects.Add(project);
@@ -214,31 +218,34 @@ public sealed class FakeProjectRepository : IProjectRepository
 public sealed class FakeRateCardRepository(FakeRoleRepository roles) : IRateCardRepository
 {
     public List<ProjectRateCard> Rates { get; } = [];
-    public List<(Guid RateCardId, DateOnly EffectiveTo)> Closed { get; } = [];
     public List<Guid> Deleted { get; } = [];
 
-    /// <summary>Invoiced time entries (project, role, date) used to decide whether a rate is frozen.</summary>
-    public List<(Guid ProjectId, Guid RoleId, DateOnly Date)> InvoicedTime { get; } = [];
+    /// <summary>(project, role) pairs with invoiced time — decides whether a rate is frozen.</summary>
+    public HashSet<(Guid ProjectId, Guid RoleId)> InvoicedTime { get; } = [];
 
-    private bool HasInvoiced(Guid projectId, Guid roleId, DateOnly from, DateOnly? to) =>
-        InvoicedTime.Any(t => t.ProjectId == projectId && t.RoleId == roleId
-            && t.Date >= from && (to is null || t.Date <= to));
+    /// <summary>(project, role) pairs with any logged time, regardless of status. Invoiced time
+    /// also counts as logged, so it is folded in automatically.</summary>
+    public HashSet<(Guid ProjectId, Guid RoleId)> LoggedTime { get; } = [];
+
+    private bool HasInvoiced(Guid projectId, Guid roleId) =>
+        InvoicedTime.Contains((projectId, roleId));
+
+    private bool HasLogged(Guid projectId, Guid roleId) =>
+        HasInvoiced(projectId, roleId) || LoggedTime.Contains((projectId, roleId));
 
     public Task<IReadOnlyList<RateCardSummary>> GetForProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<RateCardSummary>>(Rates
             .Where(r => r.ProjectId == projectId)
             .Select(r => new RateCardSummary(r, roles.Roles.Single(x => x.Id == r.RoleId).Name,
-                HasInvoiced(r.ProjectId, r.RoleId, r.EffectiveFrom, r.EffectiveTo)))
+                HasInvoiced(r.ProjectId, r.RoleId),
+                HasLogged(r.ProjectId, r.RoleId)))
             .ToList());
 
     public Task<ProjectRateCard?> GetByIdAsync(Guid rateCardId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Rates.FirstOrDefault(r => r.Id == rateCardId));
 
-    public Task<IReadOnlyList<ProjectRateCard>> GetForRoleAsync(Guid projectId, Guid roleId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<ProjectRateCard>>(Rates
-            .Where(r => r.ProjectId == projectId && r.RoleId == roleId)
-            .OrderBy(r => r.EffectiveFrom)
-            .ToList());
+    public Task<ProjectRateCard?> GetForRoleAsync(Guid projectId, Guid roleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Rates.FirstOrDefault(r => r.ProjectId == projectId && r.RoleId == roleId));
 
     public Task AddAsync(ProjectRateCard rateCard, CancellationToken cancellationToken = default)
     {
@@ -246,49 +253,28 @@ public sealed class FakeRateCardRepository(FakeRoleRepository roles) : IRateCard
         return Task.CompletedTask;
     }
 
-    public Task CloseAsync(Guid rateCardId, DateOnly effectiveTo, CancellationToken cancellationToken = default)
+    public Task<bool> HasInvoicedTimeAsync(Guid projectId, Guid roleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(HasInvoiced(projectId, roleId));
+
+    public Task<bool> HasLoggedTimeAsync(Guid projectId, Guid roleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(HasLogged(projectId, roleId));
+
+    public Task CorrectAsync(Guid rateCardId, decimal hourlyRate, CancellationToken cancellationToken = default)
     {
-        Rates.Single(r => r.Id == rateCardId).EffectiveTo = effectiveTo;
-        Closed.Add((rateCardId, effectiveTo));
+        Rates.Single(r => r.Id == rateCardId).HourlyRate = hourlyRate;
         return Task.CompletedTask;
     }
 
-    public Task<bool> HasInvoicedTimeAsync(
-        Guid projectId, Guid roleId, DateOnly effectiveFrom, DateOnly? effectiveTo,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(HasInvoiced(projectId, roleId, effectiveFrom, effectiveTo));
-
-    public Task CorrectAsync(
-        Guid rateCardId, decimal hourlyRate, DateOnly effectiveFrom,
-        Guid? priorRowId, DateOnly? priorEffectiveTo,
-        CancellationToken cancellationToken = default)
-    {
-        var row = Rates.Single(r => r.Id == rateCardId);
-        row.HourlyRate = hourlyRate;
-        row.EffectiveFrom = effectiveFrom;
-        if (priorRowId is not null)
-        {
-            Rates.Single(r => r.Id == priorRowId).EffectiveTo = priorEffectiveTo;
-        }
-
-        return Task.CompletedTask;
-    }
-
-    public Task SoftDeleteAsync(Guid rateCardId, Guid? reopenPriorRowId, CancellationToken cancellationToken = default)
+    public Task SoftDeleteAsync(Guid rateCardId, CancellationToken cancellationToken = default)
     {
         Rates.RemoveAll(r => r.Id == rateCardId);
         Deleted.Add(rateCardId);
-        if (reopenPriorRowId is not null)
-        {
-            Rates.Single(r => r.Id == reopenPriorRowId).EffectiveTo = null;
-        }
-
         return Task.CompletedTask;
     }
 
-    public Task<decimal?> ResolveAsync(Guid projectId, Guid roleId, DateOnly date, CancellationToken cancellationToken = default) =>
+    public Task<decimal?> ResolveAsync(Guid projectId, Guid roleId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Rates
-            .Where(r => r.ProjectId == projectId && r.RoleId == roleId && r.IsEffectiveOn(date))
+            .Where(r => r.ProjectId == projectId && r.RoleId == roleId)
             .Select(r => (decimal?)r.HourlyRate)
             .FirstOrDefault());
 }
@@ -384,11 +370,16 @@ public sealed class FakeBudgetAlertService : IBudgetAlertService
 public sealed class FakeAssignmentRepository : IAssignmentRepository
 {
     public List<ProjectAssignment> Assignments { get; } = [];
+    public List<Guid> Deleted { get; } = [];
+
+    /// <summary>(project, employee) pairs that have logged time — gates removal in tests.</summary>
+    public HashSet<(Guid ProjectId, Guid EmployeeId)> WithTimeEntries { get; } = [];
 
     public Task<IReadOnlyList<AssignmentSummary>> GetForProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<AssignmentSummary>>(Assignments
             .Where(a => a.ProjectId == projectId)
-            .Select(a => new AssignmentSummary(a, "employee", null))
+            .Select(a => new AssignmentSummary(a, "employee", null,
+                WithTimeEntries.Contains((a.ProjectId, a.EmployeeId))))
             .ToList());
 
     public Task<IReadOnlyList<EmployeeAssignment>> GetForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default) =>
@@ -403,6 +394,9 @@ public sealed class FakeAssignmentRepository : IAssignmentRepository
     public Task<ProjectAssignment?> GetByProjectAndEmployeeAsync(Guid projectId, Guid employeeId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Assignments.FirstOrDefault(a => a.ProjectId == projectId && a.EmployeeId == employeeId));
 
+    public Task<bool> HasTimeEntriesAsync(Guid projectId, Guid employeeId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(WithTimeEntries.Contains((projectId, employeeId)));
+
     public Task AddAsync(ProjectAssignment assignment, CancellationToken cancellationToken = default)
     {
         Assignments.Add(assignment);
@@ -410,6 +404,13 @@ public sealed class FakeAssignmentRepository : IAssignmentRepository
     }
 
     public Task UpdateAsync(ProjectAssignment assignment, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task DeleteAsync(Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        Assignments.RemoveAll(a => a.Id == assignmentId);
+        Deleted.Add(assignmentId);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class FakeTimeEntryRepository : ITimeEntryRepository

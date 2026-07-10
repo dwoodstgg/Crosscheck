@@ -10,16 +10,18 @@
     <span asp-validation-for="ClientId" class="text-danger"></span>
 </div>
 
-<div class="mb-3">
-    <label asp-for="Name" class="form-label"></label>
-    <input asp-for="Name" class="form-control" />
-    <span asp-validation-for="Name" class="text-danger"></span>
-</div>
-
-<div class="mb-3">
-    <label asp-for="Code" class="form-label"></label>
-    <input asp-for="Code" class="form-control text-uppercase" style="max-width: 14rem" placeholder="GEO-014" />
-    <span asp-validation-for="Code" class="text-danger"></span>
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="Name" class="form-label"></label>
+        <input asp-for="Name" class="form-control" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
+    <div class="col-md-6 mb-3">
+        <label asp-for="Code" class="form-label"></label>
+        <span class="text-danger" aria-hidden="true">*</span>
+        <input asp-for="Code" class="form-control text-uppercase" placeholder="GEO-014" />
+        <span asp-validation-for="Code" class="text-danger"></span>
+    </div>
 </div>
 
 <div class="mb-3">

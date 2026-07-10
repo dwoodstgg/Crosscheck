@@ -45,11 +45,11 @@ public class ApprovalService(
 
         if (entry.IsBillable)
         {
-            var rate = await rateCards.ResolveAsync(entry.ProjectId, entry.BillingRoleId, entry.EntryDate, cancellationToken);
+            var rate = await rateCards.ResolveAsync(entry.ProjectId, entry.BillingRoleId, cancellationToken);
             if (rate is null)
             {
                 throw new DomainException(
-                    "No rate card covers this entry's (project, billing role) on its date — add a rate before approving.");
+                    "No rate card covers this entry's (project, billing role) — add a rate before approving.");
             }
         }
 

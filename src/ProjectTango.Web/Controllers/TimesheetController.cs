@@ -152,7 +152,7 @@ public class TimesheetController(
             return new
             {
                 id = p.ProjectId,
-                label = $"{p.ClientName} – {p.Name}",
+                label = $"{p.ClientName} – {p.Code}",
                 roleId = p.DefaultBillingRoleId ?? fallbackRole,
                 cells,
             };

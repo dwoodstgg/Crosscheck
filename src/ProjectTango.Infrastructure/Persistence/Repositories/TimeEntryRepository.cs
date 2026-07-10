@@ -78,8 +78,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
                     FROM project_rate_cards rc
                     WHERE rc.project_id = te.project_id
                       AND rc.role_id = te.billing_role_id
-                      AND rc.effective_from <= te.entry_date
-                      AND (rc.effective_to IS NULL OR rc.effective_to >= te.entry_date)
+                      AND rc.deleted_at IS NULL
                     LIMIT 1) AS resolved_rate
             FROM time_entries te
             JOIN employees e ON e.id = te.employee_id

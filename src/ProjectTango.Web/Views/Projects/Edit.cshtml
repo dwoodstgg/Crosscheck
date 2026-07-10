@@ -2,7 +2,6 @@
 @model ProjectManageViewModel
 @{
     var project = Model.Project;
-    var today = DateOnly.FromDateTime(DateTime.Today);
     ViewData["Title"] = $"{project.Code} — {project.Name}";
 }
 
@@ -15,7 +14,13 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="mb-0"><code>@project.Code</code> @project.Name</h1>
+    <h1 class="mb-0">
+        <code>@project.Code</code>
+        @if (!string.Equals(project.Name, project.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            <span>@project.Name</span>
+        }
+    </h1>
     <div>
         <a class="btn btn-outline-secondary" asp-action="Dashboard" asp-route-id="@project.Id">Dashboard</a>
         @if (project.Status == ProjectStatus.Draft)
@@ -53,54 +58,45 @@
 </p>
 
 <div class="row g-4">
-    <div class="col-lg-5">
-        <div class="card panel-card mb-4">
-            <div class="card-header">Details</div>
-            <div class="card-body">
-                <form asp-action="Edit" asp-route-id="@project.Id">
+    <div class="col-12">
+        @* Details + Budget share one Save. The submit button lives at the page bottom (outside
+           this form) via the HTML5 form attribute, so Rate card and Team can keep their own
+           independent forms in between without illegal nesting. *@
+        <form id="project-form" asp-action="Edit" asp-route-id="@project.Id">
+            <div class="card panel-card mb-4">
+                <div class="card-header">Details</div>
+                <div class="card-body">
                     <partial name="_Form" model="Model.Form" />
-                    <div class="d-flex gap-2 mt-3">
-                        <button type="submit" class="btn btn-primary">Save</button>
-                        <a class="btn btn-outline-secondary" asp-action="Index">Back</a>
-                    </div>
-                </form>
+                </div>
             </div>
-        </div>
 
-        <partial name="_BudgetCard" model="Model" />
-    </div>
+            <partial name="_BudgetCard" model="Model" />
+        </form>
 
-    <div class="col-lg-7">
-        <div class="card panel-card mb-4">
+        <div class="card panel-card mt-4 mb-4">
             <div class="card-header">Rate card</div>
             <div class="card-body">
                 <p class="text-muted small mb-2">
-                    Rates are effective-dated per billing role. A change closes the current rate the day
-                    before and starts a new one — history is never edited, past entries never re-price.
+                    One rate per billing role, fixed for the life of the project (set from the contract).
                     <strong>Edit</strong> is for fixing a mistaken entry, not a rate change; it's locked
                     once a rate has priced invoiced time.
                 </p>
                 <table class="table table-sm align-middle">
                     <thead>
-                        <tr><th>Billing role</th><th class="text-end">Rate</th><th>Effective</th><th></th><th class="text-end"></th></tr>
+                        <tr><th>Billing role</th><th class="text-end">Rate</th><th class="text-end"></th></tr>
                     </thead>
                     <tbody>
                         @if (Model.Rates.Count == 0)
                         {
-                            <tr><td colspan="5" class="text-muted">No rates yet — time can't be approved without one.</td></tr>
+                            <tr><td colspan="3" class="text-muted">No rates yet — time can't be approved without one.</td></tr>
                         }
                         @foreach (var rate in Model.Rates)
                         {
                             var rc = rate.RateCard;
-                            var current = rc.EffectiveTo is null;
                             var editId = $"rate-edit-{rc.Id}";
-                            <tr class="@(current ? null : "text-muted")">
+                            <tr>
                                 <td>@rate.RoleName</td>
                                 <td class="text-end">@rc.HourlyRate.ToString("C2")/hr</td>
-                                <td class="text-nowrap">
-                                    @rc.EffectiveFrom.ToString("yyyy-MM-dd") → @(rc.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")
-                                </td>
-                                <td>@if (current) { <span class="badge text-bg-success">current</span> }</td>
                                 <td class="text-end text-nowrap">
                                     @if (rate.HasBilledTime)
                                     {
@@ -110,18 +106,25 @@
                                     {
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false">Edit</button>
-                                        <form asp-action="DeleteRate" asp-route-id="@project.Id" method="post" class="d-inline"
-                                              onsubmit="return confirm('Remove this rate row? Use this to fix a mistaken entry, not to record a rate change.');">
-                                            <input type="hidden" name="rateCardId" value="@rc.Id" />
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                        </form>
+                                        @if (rate.HasLoggedTime)
+                                        {
+                                            <span class="text-muted small ms-1" title="Time has been logged at this rate — it can't be removed. Correct it instead.">🔒 logged</span>
+                                        }
+                                        else
+                                        {
+                                            <form asp-action="DeleteRate" asp-route-id="@project.Id" method="post" class="d-inline"
+                                                  onsubmit="return confirm('Remove this rate row? Use this to fix a mistaken entry, not to record a rate change.');">
+                                                <input type="hidden" name="rateCardId" value="@rc.Id" />
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                            </form>
+                                        }
                                     }
                                 </td>
                             </tr>
                             @if (!rate.HasBilledTime)
                             {
                                 <tr class="collapse" id="@editId">
-                                    <td colspan="5" class="bg-body-tertiary">
+                                    <td colspan="3" class="bg-body-tertiary">
                                         <form asp-action="CorrectRate" asp-route-id="@project.Id" method="post" class="row g-2 align-items-end">
                                             <input type="hidden" name="rateCardId" value="@rc.Id" />
                                             <div class="col-auto">
@@ -130,12 +133,7 @@
                                                        class="form-control form-control-sm" style="width: 8rem" required />
                                             </div>
                                             <div class="col-auto">
-                                                <label class="form-label small mb-1">Effective from</label>
-                                                <input name="effectiveFrom" type="date" value="@rc.EffectiveFrom.ToString("yyyy-MM-dd")"
-                                                       class="form-control form-control-sm" required />
-                                            </div>
-                                            <div class="col-auto">
-                                                <button type="submit" class="btn btn-sm btn-primary">Save correction</button>
+                                                <button type="submit" class="btn btn-sm btn-primary">Apply correction</button>
                                             </div>
                                             <div class="col-12">
                                                 <span class="text-muted small">Corrects a mistaken entry in place — not a rate change. Invoiced history never re-prices.</span>
@@ -166,10 +164,6 @@
                             <input name="hourlyRate" type="number" step="0.01" min="0" class="form-control form-control-sm" style="width: 8rem" required />
                         </div>
                         <div class="col-auto">
-                            <label class="form-label small mb-1">Effective from</label>
-                            <input name="effectiveFrom" type="date" value="@today.ToString("yyyy-MM-dd")" class="form-control form-control-sm" required />
-                        </div>
-                        <div class="col-auto">
                             <button type="submit" class="btn btn-sm btn-primary">Set rate</button>
                         </div>
                     </form>
@@ -181,12 +175,13 @@
             <div class="card-header">Team</div>
             <div class="card-body">
                 <p class="text-muted small mb-2">
-                    Time entry requires an active assignment. The default billing role only pre-selects
+                    An assigned employee stays on the team for the life of the project. Removing takes
+                    them off — their logged time is preserved. The default billing role only pre-selects
                     in the timesheet — the billing role is chosen per entry.
                 </p>
                 <table class="table table-sm align-middle">
                     <thead>
-                        <tr><th>Employee</th><th>Default billing role</th><th>Active</th><th></th></tr>
+                        <tr><th>Employee</th><th>Default billing role</th><th>Status</th><th></th></tr>
                     </thead>
                     <tbody>
                         @if (Model.Assignments.Count == 0)
@@ -196,20 +191,39 @@
                         @foreach (var item in Model.Assignments)
                         {
                             var a = item.Assignment;
-                            var ended = a.EndDate is not null && a.EndDate < today;
+                            var ended = a.EndDate is not null;
                             <tr class="@(ended ? "text-muted" : null)">
                                 <td>@item.EmployeeName</td>
                                 <td>@(item.DefaultRoleName ?? "—")</td>
-                                <td class="text-nowrap">
-                                    @(a.StartDate?.ToString("yyyy-MM-dd") ?? "…") → @(a.EndDate?.ToString("yyyy-MM-dd") ?? "open")
-                                </td>
-                                <td class="text-end">
-                                    @if (a.EndDate is null)
+                                <td>
+                                    @if (ended)
                                     {
-                                        <form asp-action="EndAssignment" asp-route-id="@project.Id" method="post" class="d-inline">
+                                        <span class="badge text-bg-secondary">Ended</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-success">Active</span>
+                                    }
+                                </td>
+                                <td class="text-end text-nowrap">
+                                    @if (ended)
+                                    {
+                                        <form asp-action="ReactivateAssignment" asp-route-id="@project.Id" method="post" class="d-inline">
+                                            <input type="hidden" name="assignmentId" value="@a.Id" />
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary"
+                                                    title="Puts this person back on the active team">Reactivate</button>
+                                        </form>
+                                    }
+                                    else
+                                    {
+                                        var confirmText = item.HasTimeEntries
+                                            ? $"Remove {item.EmployeeName} from the team? Their logged time is kept, but they drop off the active team and can't log new time."
+                                            : $"Remove {item.EmployeeName} from the team? No time has been logged, so this deletes the assignment.";
+                                        <form asp-action="RemoveAssignment" asp-route-id="@project.Id" method="post" class="d-inline"
+                                              onsubmit="return confirm('@confirmText');">
                                             <input type="hidden" name="assignmentId" value="@a.Id" />
                                             <button type="submit" class="btn btn-sm btn-outline-danger"
-                                                    title="Ends today; time already logged is unaffected">End</button>
+                                                    title="Takes this person off the project">Remove</button>
                                         </form>
                                     }
                                 </td>
@@ -233,24 +247,32 @@
                         </div>
                         <div class="col-auto">
                             <label class="form-label small mb-1">Default billing role</label>
-                            <select name="defaultBillingRoleId" class="form-select form-select-sm">
+                            <select name="defaultBillingRoleId" class="form-select form-select-sm"
+                                    disabled="@(Model.RateCardRoleOptions.Count == 0)">
                                 <option value="">— optional —</option>
-                                @foreach (var option in Model.BillableRoleOptions)
+                                @foreach (var option in Model.RateCardRoleOptions)
                                 {
                                     <option value="@option.Value">@option.Text</option>
                                 }
                             </select>
                         </div>
                         <div class="col-auto">
-                            <label class="form-label small mb-1">Start date</label>
-                            <input name="startDate" type="date" class="form-control form-control-sm" />
-                        </div>
-                        <div class="col-auto">
                             <button type="submit" class="btn btn-sm btn-primary">Assign</button>
                         </div>
+                        @if (Model.RateCardRoleOptions.Count == 0)
+                        {
+                            <div class="col-12">
+                                <span class="text-muted small">Only roles with a rate card can be a default billing role — add a rate above first.</span>
+                            </div>
+                        }
                     </form>
                 </div>
             </div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" form="project-form" class="btn btn-primary">Save</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Back</a>
         </div>
     </div>
 </div>

@@ -59,6 +59,16 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         return row is null ? null : ToProject(row);
     }
 
+    public async Task<Project?> GetByClientAndCodeAsync(Guid clientId, string code, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<ProjectRow>(new CommandDefinition(
+            $"{SelectColumns} WHERE p.client_id = @clientId AND p.code = @code",
+            new { clientId, code },
+            cancellationToken: cancellationToken));
+        return row is null ? null : ToProject(row);
+    }
+
     public async Task AddAsync(Project project, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);

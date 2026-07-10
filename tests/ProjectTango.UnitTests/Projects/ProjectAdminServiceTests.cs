@@ -44,7 +44,7 @@ public class ProjectAdminServiceTests
     }
 
     [Fact]
-    public async Task Create_rejects_duplicate_code_case_insensitively()
+    public async Task Create_rejects_duplicate_code_for_same_client_case_insensitively()
     {
         await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, null, null);
 
@@ -52,6 +52,21 @@ public class ProjectAdminServiceTests
             _service.CreateAsync(_client.Id, "Two", "geo-001", _pm.Id, null, null));
 
         Assert.Contains("already in use", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_allows_same_code_under_a_different_client()
+    {
+        var otherClient = new Client { Id = Guid.NewGuid(), Name = "MDWFP" };
+        _clients.Clients.Add(otherClient);
+
+        await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, null, null);
+
+        // Same code, different client — allowed (codes are unique per client, not globally).
+        var project = await _service.CreateAsync(otherClient.Id, "Two", "GEO-001", _pm.Id, null, null);
+
+        Assert.Equal("GEO-001", project.Code);
+        Assert.Equal(otherClient.Id, project.ClientId);
     }
 
     [Fact]

@@ -13,5 +13,10 @@ public class ProjectManageViewModel
     public Budget? Budget { get; init; }
     public IReadOnlyList<BudgetRevisionSummary> BudgetRevisions { get; init; } = [];
     public List<SelectListItem> BillableRoleOptions { get; init; } = [];
+
+    /// <summary>Billing roles that have a rate card on this project — the only roles that can be a
+    /// team member's default billing role.</summary>
+    public List<SelectListItem> RateCardRoleOptions { get; init; } = [];
+
     public List<SelectListItem> EmployeeOptions { get; init; } = [];
 }

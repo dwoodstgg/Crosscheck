@@ -5,9 +5,9 @@ using ProjectTango.Domain.Entities;
 
 namespace ProjectTango.Application.Projects;
 
-/// <summary>Rate card management. A rate change closes the current open row the day
-/// before the new rate starts and inserts a new row — history is never edited, so
-/// past time entries are never re-priced.</summary>
+/// <summary>Rate card management. Rates are fixed for the life of the project — one live row
+/// per (project, billing role), set from the contract. Editing is for fixing a mistaken entry
+/// and is locked once the rate has priced invoiced time.</summary>
 public class RateCardService(
     ICurrentUser currentUser,
     IProjectRepository projects,
@@ -22,7 +22,7 @@ public class RateCardService(
     }
 
     public async Task SetRateAsync(
-        Guid projectId, Guid roleId, decimal hourlyRate, DateOnly effectiveFrom,
+        Guid projectId, Guid roleId, decimal hourlyRate,
         CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -42,17 +42,10 @@ public class RateCardService(
         }
 
         var existing = await rateCards.GetForRoleAsync(projectId, roleId, cancellationToken);
-        var latest = existing.MaxBy(r => r.EffectiveFrom);
-        if (latest is not null && effectiveFrom <= latest.EffectiveFrom)
+        if (existing is not null)
         {
             throw new DomainException(
-                $"A rate starting {latest.EffectiveFrom:yyyy-MM-dd} already exists — rate changes must start after it. " +
-                "Historical entries are never re-priced.");
-        }
-
-        if (latest is { EffectiveTo: null })
-        {
-            await rateCards.CloseAsync(latest.Id, effectiveFrom.AddDays(-1), cancellationToken);
+                $"{role.Name} already has a rate on this project — edit it instead of adding another.");
         }
 
         var rateCard = new ProjectRateCard
@@ -61,7 +54,6 @@ public class RateCardService(
             ProjectId = projectId,
             RoleId = roleId,
             HourlyRate = hourlyRate,
-            EffectiveFrom = effectiveFrom,
         };
         await rateCards.AddAsync(rateCard, cancellationToken);
 
@@ -71,17 +63,14 @@ public class RateCardService(
             {
                 Role = role.Name,
                 HourlyRate = hourlyRate,
-                EffectiveFrom = effectiveFrom.ToString("yyyy-MM-dd"),
-                Superseded = latest?.HourlyRate,
                 adminOverride,
             }), cancellationToken);
     }
 
-    /// <summary>Fixes a data-entry mistake on an existing rate row (wrong amount and/or
-    /// start date) in place. This is NOT a rate change — it only touches a row that has not
-    /// yet priced any invoiced time, so no billed history is ever re-priced.</summary>
+    /// <summary>Fixes a data-entry mistake on an existing rate row (wrong amount) in place.
+    /// This is NOT a rate change — it's locked once the rate has priced invoiced time.</summary>
     public async Task CorrectRateAsync(
-        Guid projectId, Guid rateCardId, decimal hourlyRate, DateOnly effectiveFrom,
+        Guid projectId, Guid rateCardId, decimal hourlyRate,
         CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -99,45 +88,13 @@ public class RateCardService(
             throw new DomainException("Unknown rate.");
         }
 
-        if (await rateCards.HasInvoicedTimeAsync(projectId, rate.RoleId, rate.EffectiveFrom, rate.EffectiveTo, cancellationToken))
+        if (await rateCards.HasInvoicedTimeAsync(projectId, rate.RoleId, cancellationToken))
         {
             throw new DomainException(
                 "This rate has already priced invoiced time and can no longer be corrected — void the invoice instead.");
         }
 
-        var ordered = (await rateCards.GetForRoleAsync(projectId, rate.RoleId, cancellationToken))
-            .OrderBy(r => r.EffectiveFrom).ToList();
-        var index = ordered.FindIndex(r => r.Id == rate.Id);
-        var prior = index > 0 ? ordered[index - 1] : null;
-        var next = index >= 0 && index < ordered.Count - 1 ? ordered[index + 1] : null;
-
-        if (prior is not null && effectiveFrom <= prior.EffectiveFrom)
-        {
-            throw new DomainException(
-                $"Effective date must be after the previous rate ({prior.EffectiveFrom:yyyy-MM-dd}).");
-        }
-        if (next is not null && effectiveFrom >= next.EffectiveFrom)
-        {
-            throw new DomainException(
-                $"Effective date must be before the next rate ({next.EffectiveFrom:yyyy-MM-dd}).");
-        }
-        if (rate.EffectiveTo is not null && effectiveFrom > rate.EffectiveTo)
-        {
-            throw new DomainException("Effective date must be on or before this rate's end date.");
-        }
-
-        // Keep history contiguous: if the predecessor was closed exactly to abut this row,
-        // move its end so it still sits just before the new start.
-        Guid? priorRowId = null;
-        DateOnly? priorEffectiveTo = null;
-        if (prior is not null && effectiveFrom != rate.EffectiveFrom
-            && prior.EffectiveTo == rate.EffectiveFrom.AddDays(-1))
-        {
-            priorRowId = prior.Id;
-            priorEffectiveTo = effectiveFrom.AddDays(-1);
-        }
-
-        await rateCards.CorrectAsync(rate.Id, hourlyRate, effectiveFrom, priorRowId, priorEffectiveTo, cancellationToken);
+        await rateCards.CorrectAsync(rate.Id, hourlyRate, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
             currentUser.EmployeeId, "rate.correct", "project", projectId,
@@ -146,14 +103,12 @@ public class RateCardService(
                 RateCardId = rate.Id,
                 FromRate = rate.HourlyRate,
                 ToRate = hourlyRate,
-                FromEffective = rate.EffectiveFrom.ToString("yyyy-MM-dd"),
-                ToEffective = effectiveFrom.ToString("yyyy-MM-dd"),
                 adminOverride,
             }), cancellationToken);
     }
 
-    /// <summary>Soft-deletes a mistaken rate row (as long as it hasn't priced invoiced
-    /// time). If it was the current open row, the predecessor it closed is reopened.</summary>
+    /// <summary>Soft-deletes a mistaken rate row (as long as it hasn't priced or been logged
+    /// against any time).</summary>
     public async Task DeleteRateAsync(Guid projectId, Guid rateCardId, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -166,26 +121,21 @@ public class RateCardService(
             throw new DomainException("Unknown rate.");
         }
 
-        if (await rateCards.HasInvoicedTimeAsync(projectId, rate.RoleId, rate.EffectiveFrom, rate.EffectiveTo, cancellationToken))
+        if (await rateCards.HasInvoicedTimeAsync(projectId, rate.RoleId, cancellationToken))
         {
             throw new DomainException(
                 "This rate has already priced invoiced time and can no longer be removed — void the invoice instead.");
         }
 
-        var ordered = (await rateCards.GetForRoleAsync(projectId, rate.RoleId, cancellationToken))
-            .OrderBy(r => r.EffectiveFrom).ToList();
-        var index = ordered.FindIndex(r => r.Id == rate.Id);
-        var prior = index > 0 ? ordered[index - 1] : null;
-
-        // Removing the current open row leaves the predecessor closed — reopen it so the
-        // role keeps an active rate.
-        Guid? reopenPriorRowId = null;
-        if (rate.EffectiveTo is null && prior is not null && prior.EffectiveTo == rate.EffectiveFrom.AddDays(-1))
+        // Even before invoicing, removing a rate that has priced logged time would leave those
+        // entries unpriceable. Block it — correct the rate or the entries instead.
+        if (await rateCards.HasLoggedTimeAsync(projectId, rate.RoleId, cancellationToken))
         {
-            reopenPriorRowId = prior.Id;
+            throw new DomainException(
+                "Time has been logged against this rate — it can't be removed. Correct the rate, or remove those time entries first.");
         }
 
-        await rateCards.SoftDeleteAsync(rate.Id, reopenPriorRowId, cancellationToken);
+        await rateCards.SoftDeleteAsync(rate.Id, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
             currentUser.EmployeeId, "rate.delete", "project", projectId,
@@ -193,8 +143,6 @@ public class RateCardService(
             {
                 RateCardId = rate.Id,
                 rate.HourlyRate,
-                EffectiveFrom = rate.EffectiveFrom.ToString("yyyy-MM-dd"),
-                ReopenedPrior = reopenPriorRowId,
                 adminOverride,
             }), cancellationToken);
     }

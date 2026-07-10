@@ -145,8 +145,9 @@ public class BudgetService(
     }
 
     /// <summary>Keeps thresholds sane: whole percents in 1..100, de-duplicated and sorted.
-    /// A null/empty list falls back to the standard {50, 75, 90}.</summary>
-    private static int[] NormalizeThresholds(int[]? thresholds)
+    /// A null/empty list falls back to the standard {50, 75, 90}. Public so callers can
+    /// normalize the same way before comparing (e.g. to avoid writing a no-op revision).</summary>
+    public static int[] NormalizeThresholds(int[]? thresholds)
     {
         if (thresholds is null || thresholds.Length == 0)
         {

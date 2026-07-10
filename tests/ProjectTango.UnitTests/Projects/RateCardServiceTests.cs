@@ -37,48 +37,41 @@ public class RateCardServiceTests
     }
 
     [Fact]
-    public async Task First_rate_is_open_ended()
+    public async Task Set_rate_adds_single_row()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m);
 
         var rate = Assert.Single(_rateCards.Rates);
         Assert.Equal(150m, rate.HourlyRate);
-        Assert.Null(rate.EffectiveTo);
         Assert.Single(_audit.Events, e => e.Action == "rate.set");
     }
 
     [Fact]
-    public async Task Rate_change_closes_previous_row_day_before()
+    public async Task Second_rate_for_same_role_is_rejected()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1));
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 7, 1));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m);
 
-        Assert.Equal(2, _rateCards.Rates.Count);
-        var closed = Assert.Single(_rateCards.Closed);
-        Assert.Equal(new DateOnly(2026, 6, 30), closed.EffectiveTo);
+        var ex = await Assert.ThrowsAsync<DomainException>(() =>
+            _service.SetRateAsync(_project.Id, _developerRole.Id, 165m));
 
-        // Resolution picks the correct row on each side of the boundary.
-        Assert.Equal(150m, await _rateCards.ResolveAsync(_project.Id, _developerRole.Id, new DateOnly(2026, 6, 30)));
-        Assert.Equal(165m, await _rateCards.ResolveAsync(_project.Id, _developerRole.Id, new DateOnly(2026, 7, 1)));
-        Assert.Null(await _rateCards.ResolveAsync(_project.Id, _developerRole.Id, new DateOnly(2025, 12, 31)));
+        Assert.Contains("already has a rate", ex.Message);
+        Assert.Single(_rateCards.Rates);
     }
 
     [Fact]
-    public async Task Rate_change_must_start_after_latest_existing()
+    public async Task Resolve_returns_rate_for_project_and_role()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 6, 1));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m);
 
-        await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 6, 1)));
-        await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 1, 1)));
+        Assert.Equal(150m, await _rateCards.ResolveAsync(_project.Id, _developerRole.Id));
+        Assert.Null(await _rateCards.ResolveAsync(_project.Id, _adminRole.Id));
     }
 
     [Fact]
     public async Task Non_billable_role_is_rejected()
     {
         var ex = await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetRateAsync(_project.Id, _adminRole.Id, 150m, new DateOnly(2026, 1, 1)));
+            _service.SetRateAsync(_project.Id, _adminRole.Id, 150m));
 
         Assert.Contains("not a billable role", ex.Message);
     }
@@ -89,80 +82,51 @@ public class RateCardServiceTests
         _project.ProjectManagerId = Guid.NewGuid();
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1)));
+            _service.SetRateAsync(_project.Id, _developerRole.Id, 150m));
     }
 
     [Fact]
     public async Task Correct_fixes_amount_in_place()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m, new DateOnly(2026, 7, 8));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m);
         var rate = Assert.Single(_rateCards.Rates);
 
-        await _service.CorrectRateAsync(_project.Id, rate.Id, 150m, new DateOnly(2026, 7, 8));
+        await _service.CorrectRateAsync(_project.Id, rate.Id, 150m);
 
         Assert.Equal(150m, Assert.Single(_rateCards.Rates).HourlyRate);
         Assert.Single(_audit.Events, e => e.Action == "rate.correct");
     }
 
     [Fact]
-    public async Task Correct_moves_start_and_reabuts_predecessor()
-    {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1));
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 7, 1));
-        var current = _rateCards.Rates.Single(r => r.EffectiveTo is null);
-        var prior = _rateCards.Rates.Single(r => r.EffectiveTo is not null);
-
-        // Slide the change earlier; the predecessor's close date should follow.
-        await _service.CorrectRateAsync(_project.Id, current.Id, 165m, new DateOnly(2026, 6, 1));
-
-        Assert.Equal(new DateOnly(2026, 6, 1), current.EffectiveFrom);
-        Assert.Equal(new DateOnly(2026, 5, 31), prior.EffectiveTo);
-    }
-
-    [Fact]
-    public async Task Correct_rejects_start_on_or_before_previous()
-    {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1));
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 7, 1));
-        var current = _rateCards.Rates.Single(r => r.EffectiveTo is null);
-
-        await Assert.ThrowsAsync<DomainException>(() =>
-            _service.CorrectRateAsync(_project.Id, current.Id, 165m, new DateOnly(2026, 1, 1)));
-    }
-
-    [Fact]
     public async Task Correct_blocked_once_time_is_invoiced()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m, new DateOnly(2026, 7, 8));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m);
         var rate = Assert.Single(_rateCards.Rates);
-        _rateCards.InvoicedTime.Add((_project.Id, _developerRole.Id, new DateOnly(2026, 7, 10)));
+        _rateCards.InvoicedTime.Add((_project.Id, _developerRole.Id));
 
         var ex = await Assert.ThrowsAsync<DomainException>(() =>
-            _service.CorrectRateAsync(_project.Id, rate.Id, 150m, new DateOnly(2026, 7, 8)));
+            _service.CorrectRateAsync(_project.Id, rate.Id, 150m));
         Assert.Contains("invoiced", ex.Message);
     }
 
     [Fact]
-    public async Task Delete_removes_current_row_and_reopens_predecessor()
+    public async Task Delete_removes_row()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m, new DateOnly(2026, 1, 1));
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 165m, new DateOnly(2026, 7, 1));
-        var current = _rateCards.Rates.Single(r => r.EffectiveTo is null);
-        var priorId = _rateCards.Rates.Single(r => r.EffectiveTo is not null).Id;
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 150m);
+        var rate = Assert.Single(_rateCards.Rates);
 
-        await _service.DeleteRateAsync(_project.Id, current.Id);
+        await _service.DeleteRateAsync(_project.Id, rate.Id);
 
-        Assert.DoesNotContain(_rateCards.Rates, r => r.Id == current.Id);
-        Assert.Null(_rateCards.Rates.Single(r => r.Id == priorId).EffectiveTo);
+        Assert.DoesNotContain(_rateCards.Rates, r => r.Id == rate.Id);
         Assert.Single(_audit.Events, e => e.Action == "rate.delete");
     }
 
     [Fact]
     public async Task Delete_blocked_once_time_is_invoiced()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m, new DateOnly(2026, 7, 8));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m);
         var rate = Assert.Single(_rateCards.Rates);
-        _rateCards.InvoicedTime.Add((_project.Id, _developerRole.Id, new DateOnly(2026, 7, 10)));
+        _rateCards.InvoicedTime.Add((_project.Id, _developerRole.Id));
 
         await Assert.ThrowsAsync<DomainException>(() =>
             _service.DeleteRateAsync(_project.Id, rate.Id));
@@ -170,13 +134,27 @@ public class RateCardServiceTests
     }
 
     [Fact]
+    public async Task Delete_blocked_when_time_is_logged_but_not_invoiced()
+    {
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m);
+        var rate = Assert.Single(_rateCards.Rates);
+        _rateCards.LoggedTime.Add((_project.Id, _developerRole.Id));
+
+        var ex = await Assert.ThrowsAsync<DomainException>(() =>
+            _service.DeleteRateAsync(_project.Id, rate.Id));
+
+        Assert.Contains("logged", ex.Message);
+        Assert.DoesNotContain(_rateCards.Deleted, id => id == rate.Id);
+    }
+
+    [Fact]
     public async Task Pm_of_other_project_cannot_correct_rates()
     {
-        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m, new DateOnly(2026, 7, 8));
+        await _service.SetRateAsync(_project.Id, _developerRole.Id, 135m);
         var rate = Assert.Single(_rateCards.Rates);
         _project.ProjectManagerId = Guid.NewGuid();
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            _service.CorrectRateAsync(_project.Id, rate.Id, 150m, new DateOnly(2026, 7, 8)));
+            _service.CorrectRateAsync(_project.Id, rate.Id, 150m));
     }
 }

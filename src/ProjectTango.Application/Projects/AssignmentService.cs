@@ -6,14 +6,16 @@ using ProjectTango.Domain.Entities;
 
 namespace ProjectTango.Application.Projects;
 
-/// <summary>Team assignment. One row per person per project — ending an assignment
-/// sets its end date (nothing is deleted); assigning the same person again reopens it.</summary>
+/// <summary>Team assignment. One row per person per project — an employee stays active for the
+/// life of the project. Removing hard-deletes a never-used assignment or soft-deactivates one
+/// with logged time (sets EndDate); assigning the same person again reopens it.</summary>
 public class AssignmentService(
     ICurrentUser currentUser,
     IProjectRepository projects,
     IAssignmentRepository assignments,
     IEmployeeRepository employees,
     IRoleRepository roles,
+    IRateCardRepository rateCards,
     IAuditLog audit)
 {
     public async Task<IReadOnlyList<AssignmentSummary>> ListForProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -23,7 +25,7 @@ public class AssignmentService(
     }
 
     public async Task AssignAsync(
-        Guid projectId, Guid employeeId, Guid? defaultBillingRoleId, DateOnly? startDate,
+        Guid projectId, Guid employeeId, Guid? defaultBillingRoleId,
         CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -44,6 +46,15 @@ public class AssignmentService(
             {
                 throw new DomainException($"{role.Name} is not a billable role.");
             }
+
+            // The default billing role must be priced on this project — a person can only default
+            // to a role the rate card covers (design rule 3: rates resolve on the project rate card).
+            var rate = await rateCards.GetForRoleAsync(projectId, defaultBillingRoleId.Value, cancellationToken);
+            if (rate is null)
+            {
+                throw new DomainException(
+                    $"{role.DisplayName} has no rate card on this project — add a rate for it before assigning it as a default billing role.");
+            }
         }
 
         var existing = await assignments.GetByProjectAndEmployeeAsync(projectId, employeeId, cancellationToken);
@@ -57,7 +68,6 @@ public class AssignmentService(
             // Reopen the ended assignment (unique row per person per project).
             existing.EndDate = null;
             existing.DefaultBillingRoleId = defaultBillingRoleId;
-            existing.StartDate = startDate ?? existing.StartDate;
             await assignments.UpdateAsync(existing, cancellationToken);
 
             await audit.WriteAsync(new AuditEvent(
@@ -72,7 +82,6 @@ public class AssignmentService(
             ProjectId = projectId,
             EmployeeId = employeeId,
             DefaultBillingRoleId = defaultBillingRoleId,
-            StartDate = startDate,
         };
         await assignments.AddAsync(assignment, cancellationToken);
 
@@ -81,7 +90,10 @@ public class AssignmentService(
             new { Employee = employee.DisplayName, adminOverride }), cancellationToken);
     }
 
-    public async Task EndAsync(Guid assignmentId, DateOnly endDate, CancellationToken cancellationToken = default)
+    /// <summary>Takes an employee off a project. If they've logged no time the roster entry is
+    /// hard-deleted (a mistaken add); if they have, it's soft-deactivated (EndDate set) so their
+    /// logged time is preserved but they drop off the active team and can't log new time.</summary>
+    public async Task RemoveAsync(Guid assignmentId, CancellationToken cancellationToken = default)
     {
         var assignment = await assignments.GetAsync(assignmentId, cancellationToken)
             ?? throw new DomainException("Unknown assignment.");
@@ -91,19 +103,46 @@ public class AssignmentService(
 
         if (assignment.EndDate is not null)
         {
-            throw new DomainException("Assignment is already ended.");
+            throw new DomainException("Assignment is already removed.");
         }
 
-        if (assignment.StartDate is not null && endDate < assignment.StartDate)
+        if (await assignments.HasTimeEntriesAsync(assignment.ProjectId, assignment.EmployeeId, cancellationToken))
         {
-            throw new DomainException("End date cannot be before the assignment's start date.");
+            assignment.EndDate = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+            await assignments.UpdateAsync(assignment, cancellationToken);
+
+            await audit.WriteAsync(new AuditEvent(
+                currentUser.EmployeeId, "assignment.ended", "project", assignment.ProjectId,
+                new { assignment.EmployeeId, adminOverride }), cancellationToken);
+            return;
         }
 
-        assignment.EndDate = endDate;
+        await assignments.DeleteAsync(assignmentId, cancellationToken);
+
+        await audit.WriteAsync(new AuditEvent(
+            currentUser.EmployeeId, "assignment.removed", "project", assignment.ProjectId,
+            new { assignment.EmployeeId, adminOverride }), cancellationToken);
+    }
+
+    /// <summary>Restores a soft-deactivated assignment (clears EndDate).</summary>
+    public async Task ReactivateAsync(Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        var assignment = await assignments.GetAsync(assignmentId, cancellationToken)
+            ?? throw new DomainException("Unknown assignment.");
+        var project = await projects.GetByIdAsync(assignment.ProjectId, cancellationToken)
+            ?? throw new DomainException("Unknown project.");
+        var adminOverride = currentUser.RequireCanManage(project);
+
+        if (assignment.EndDate is null)
+        {
+            throw new DomainException("Assignment is already active.");
+        }
+
+        assignment.EndDate = null;
         await assignments.UpdateAsync(assignment, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
-            currentUser.EmployeeId, "assignment.ended", "project", assignment.ProjectId,
-            new { assignment.EmployeeId, EndDate = endDate.ToString("yyyy-MM-dd"), adminOverride }), cancellationToken);
+            currentUser.EmployeeId, "assignment.reopened", "project", assignment.ProjectId,
+            new { assignment.EmployeeId, adminOverride }), cancellationToken);
     }
 }

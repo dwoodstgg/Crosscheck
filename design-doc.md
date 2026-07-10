@@ -42,7 +42,7 @@ A web-based application for a software company to track time spent on client pro
 
 Notes:
 - An employee can hold **multiple company roles** simultaneously (e.g., PM + Developer, or Ops Manager + Admin). Effective permissions are the **union** of all held roles.
-- An employee's **billing role is chosen per time entry** — the kind of work can change day to day, so each entry records the role it bills under (the project assignment carries an optional default that pre-selects in the UI). Rates resolve from (project, entry's billing role, entry date); company roles are permissions only. (See §5.)
+- An employee's **billing role is chosen per time entry** — the kind of work can change day to day, so each entry records the role it bills under (the project assignment carries an optional default that pre-selects in the UI). Rates resolve from (project, entry's billing role); company roles are permissions only. (See §5.)
 - "Employees" includes both W-2 staff and 1099 subcontractors (`employment_type`). Both log time identically, authenticate through the tenant, and appear in per-person total-time reporting.
 - Role model is designed to be extensible (e.g., adding QA, Designer later) — roles are data, not code. Admin is the only role with hardcoded "bypass all resource checks" semantics.
 
@@ -213,7 +213,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | id | uuid PK | |
 | client_id | uuid FK | |
 | name | text | |
-| code | text unique | Short code for invoices/reports, e.g., GEO-014 |
+| code | text, unique per client | Short code for invoices/reports, e.g., GEO-014 — `UNIQUE (client_id, code)`; the same code may recur across different clients |
 | status | enum | draft, active, on_hold, **closed**, archived — status changes are always explicit user actions (see §6.5) |
 | closed_at / closed_by | timestamptz / uuid FK | Set only by the close-out action |
 | project_manager_id | uuid FK → employees | |
@@ -230,10 +230,10 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | project_id | uuid FK | |
 | role_id | uuid FK | |
 | hourly_rate | numeric(10,2) | |
-| effective_from | date | Rate changes mid-project are new rows, not updates |
-| effective_to | date null | Open-ended until superseded |
+| deleted_at | timestamptz null | Soft delete (rule 11) |
+| unique (project_id, role_id) where deleted_at is null | | One live rate per role |
 
-> Rate resolution: a time entry bills at the rate for (project, the **entry's** billing role) effective on the entry's date. Historical entries are never re-priced when rates change — and invoiced entries lock their rate permanently (denormalized onto the invoice line). No overtime multipliers: "Extended Work Week" hours bill at the same stored rate.
+> Rates are fixed for the life of a project — one live row per (project, billing role), set from the contract. Rate resolution: a time entry bills at the rate for (project, the **entry's** billing role). Editing a rate is for fixing a mistaken entry, not a rate change, and is locked once the rate has priced invoiced time. Invoiced entries lock their rate permanently (denormalized onto the invoice line), independent of any later rate-card edit. No overtime multipliers: "Extended Work Week" hours bill at the same stored rate.
 
 **project_assignments** — who is on the project (membership, not billing role)
 | Column | Type | Notes |
@@ -242,7 +242,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | project_id | uuid FK | |
 | employee_id | uuid FK | |
 | default_billing_role_id | uuid FK → roles null | UI pre-selection only — the authoritative billing role lives on each time entry |
-| start_date / end_date | date | |
+| end_date | date null | Soft-deactivate marker: null = active. An employee stays active for the life of the project; removing sets this (or hard-deletes if no time was logged) |
 | unique (project_id, employee_id) | | One membership per person per project |
 
 **budgets**
@@ -345,7 +345,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 Imported time entries carry `import_id` (nullable FK on time_entries) so any import can be reviewed or rolled back before entries are approved.
 
 ### 5.3 Key Integrity Rules
-1. A time entry cannot be created unless the employee has an active assignment on the project.
+1. A time entry cannot be created unless the employee has an active (not-removed) assignment on the project.
 2. Owners can create, edit, and back-date `open` entries while the covering timesheet period is open; a closed period locks owner edits (Ops/Admin can reopen, audited). `approved` entries require un-approval to change; `invoiced` entries can never be edited — void the (issued) invoice instead, which returns its entries to `approved`.
 3. Every (project, billing role) pair used by an hourly-billed time entry must have a rate card row before the entry can be approved. (Milestone-attached entries on fixed-fee projects bill by milestone amount, not hours.)
 4. `hours_billed` may only be adjusted by an approver, and only until invoiced; `hours_worked` is never altered by anyone but the entry's owner.
@@ -361,7 +361,7 @@ Imported time entries carry `import_id` (nullable FK on time_entries) so any imp
 **No submission step.** Employees record time as they go and can edit freely — including back-dating entries they forgot — until the admin closes the period window or the entry is approved.
 
 1. Employee opens the **monthly** timesheet grid (projects × days, matching the current workbook layout), enters hours + notes, and picks the **billing role per entry** (pre-filled from their assignment default). On fixed-fee projects they can optionally attach the entry to a milestone; unattached entries are out-of-scope and bill hourly.
-2. Entries **auto-approve on save** (small-shop default, decided 2026-07-09 — see §10 #19): a billable entry moves straight to `approved` as soon as a rate card covers its (project, billing role, date); if none does yet it stays `open` and shows in the approval queue until a rate is added. Non-billable (leave/internal) time always auto-approves. Entries remain owner-editable — auto-approval does not lock them. Periods are **semi-monthly** (1st–15th, 16th–EOM); Ops/Admin **closes the window** after each period ends (`timesheet_periods`), which locks employee edits for those dates. Closing/reopening a window is audited; reopening is how a straggler fixes a missed day after close.
+2. Entries **auto-approve on save** (small-shop default, decided 2026-07-09 — see §10 #19): a billable entry moves straight to `approved` as soon as a rate card covers its (project, billing role); if none does yet it stays `open` and shows in the approval queue until a rate is added. Non-billable (leave/internal) time always auto-approves. Entries remain owner-editable — auto-approval does not lock them. Periods are **semi-monthly** (1st–15th, 16th–EOM); Ops/Admin **closes the window** after each period ends (`timesheet_periods`), which locks employee edits for those dates. Closing/reopening a window is audited; reopening is how a straggler fixes a missed day after close.
 3. The manual approval path stays available (not required by default): an approver can un-approve and re-approve to make the billing decision — `hours_billed` can be adjusted (worked 8, bill 6); `hours_worked` is never changed. Retained so the review step can be re-enabled per policy later.
 4. An approver can return an entry for correction with a comment (back to `open`, audited).
 
