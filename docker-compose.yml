@@ -1,15 +1,15 @@
 # Optional fallback database for machines without a native Postgres install.
 # Dev machines with local PostgreSQL 18 use that instead (see README).
 # Mapped to 5433 because the native Postgres service owns 5432.
-# Start with: docker compose up -d, then point ConnectionStrings:ProjectTango at Port=5433.
+# Start with: docker compose up -d, then point ConnectionStrings:Waypoint at Port=5433.
 services:
   postgres:
     image: postgres:17
-    container_name: projecttango-postgres
+    container_name: waypoint-postgres
     environment:
-      POSTGRES_DB: projecttango
-      POSTGRES_USER: tango
-      POSTGRES_PASSWORD: tango@123
+      POSTGRES_DB: waypoint
+      POSTGRES_USER: waypoint
+      POSTGRES_PASSWORD: waypoint@123
     ports:
       - "5433:5432"
     volumes:

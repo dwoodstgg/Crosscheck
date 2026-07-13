@@ -1,0 +1,334 @@
+@using System.Globalization
+@using Waypoint.Application.Projects
+@using Waypoint.Domain.Enums
+@model ProjectDashboard
+@{
+    ViewData["Title"] = $"{Model.Project.Code} dashboard";
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C2", usd);
+    string Hrs(decimal h) => h.ToString("0.##");
+
+    static string StatusBadge(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Active => "text-bg-success",
+        ProjectStatus.OnHold => "text-bg-warning",
+        ProjectStatus.Draft => "text-bg-secondary",
+        ProjectStatus.Closed => "text-bg-dark",
+        _ => "text-bg-light",
+    };
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-3 gap-2">
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <h1 class="h3 mb-0"><code>@Model.Project.Code</code> @Model.Project.Name</h1>
+            <span class="badge @StatusBadge(Model.Project.Status)">@(Model.Project.Status == ProjectStatus.OnHold ? "On hold" : Model.Project.Status.ToString())</span>
+        </div>
+        <div class="text-muted">@Model.ClientName</div>
+    </div>
+    <div class="btn-group">
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Index">All projects</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-action="Edit" asp-route-id="@Model.Project.Id">Manage</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-controller="Approvals" asp-action="Index" asp-route-projectId="@Model.Project.Id">Approvals</a>
+    </div>
+</div>
+
+@if (Model.HasRateGaps)
+{
+    <div class="alert alert-warning">
+        Some billable entries have no rate card for their date, so the dollar figures below understate
+        the real value. Add the missing rates on the <a asp-action="Edit" asp-route-id="@Model.Project.Id">Manage</a> page.
+    </div>
+}
+
+@if (Model.Budget is { } budget)
+{
+    var overClass = budget.IsOverBudget ? "border-danger" : "";
+    string BarClass(bool over, double pct) => over ? "bg-danger" : pct >= 90 ? "bg-warning" : "bg-success";
+
+    <div class="card panel-card mb-4 @overClass">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Budget — @(budget.Type switch {
+                BudgetType.FixedFee => "Fixed fee",
+                BudgetType.TimeAndMaterialsCap => "T&M cap",
+                BudgetType.HoursCap => "Hours cap",
+                _ => budget.Type.ToString() })</span>
+            @if (budget.IsOverBudget)
+            {
+                <span class="badge text-bg-danger">Over budget</span>
+            }
+            else if (budget.HighestThresholdCrossed is int crossed)
+            {
+                <span class="badge text-bg-warning">@crossed% burn reached</span>
+            }
+        </div>
+        <div class="card-body">
+            <div class="row g-4">
+                @if (budget.AmountBudget is not null)
+                {
+                    var pct = budget.PercentValue ?? 0;
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">Dollars — @Money(budget.SpentValue) of @Money(budget.AmountBudget.Value)</span>
+                            <span class="fw-semibold @(budget.IsOverValue ? "text-danger" : "")">@pct.ToString("0")%</span>
+                        </div>
+                        <div class="progress" role="progressbar" style="height: .75rem">
+                            <div class="progress-bar @BarClass(budget.IsOverValue, pct)" style="width: @(Math.Min(100, pct).ToString("0.#", usd))%"></div>
+                        </div>
+                        <div class="small mt-1 @(budget.IsOverValue ? "text-danger" : "text-muted")">
+                            @if (budget.RemainingValue is { } rem)
+                            {
+                                @(rem >= 0 ? $"{Money(rem)} remaining" : $"{Money(-rem)} over")
+                            }
+                            @if (budget.PendingValue > 0)
+                            {
+                                <span>· @Money(budget.PendingValue) pending (open)</span>
+                            }
+                        </div>
+                    </div>
+                }
+                @if (budget.HoursBudget is not null)
+                {
+                    var pct = budget.PercentHours ?? 0;
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">Hours — @Hrs(budget.SpentHours) of @Hrs(budget.HoursBudget.Value)</span>
+                            <span class="fw-semibold @(budget.IsOverHours ? "text-danger" : "")">@pct.ToString("0")%</span>
+                        </div>
+                        <div class="progress" role="progressbar" style="height: .75rem">
+                            <div class="progress-bar @BarClass(budget.IsOverHours, pct)" style="width: @(Math.Min(100, pct).ToString("0.#", usd))%"></div>
+                        </div>
+                        <div class="small mt-1 @(budget.IsOverHours ? "text-danger" : "text-muted")">
+                            @if (budget.RemainingHours is { } rem)
+                            {
+                                @(rem >= 0 ? $"{Hrs(rem)} hrs remaining" : $"{Hrs(-rem)} hrs over")
+                            }
+                            @if (budget.PendingHours > 0)
+                            {
+                                <span>· @Hrs(budget.PendingHours) hrs pending (open)</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @if (budget.Roles.Count > 0)
+            {
+                <hr class="my-3" />
+                <div class="text-muted small text-uppercase mb-2">Hours by role</div>
+                <div class="row g-3">
+                    @foreach (var role in budget.Roles)
+                    {
+                        var pct = role.PercentHours;
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between small mb-1">
+                                <span class="text-muted">@role.RoleName — @Hrs(role.SpentHours) of @Hrs(role.AllocatedHours) hrs</span>
+                                <span class="fw-semibold @(role.IsOver ? "text-danger" : "")">@pct.ToString("0")%</span>
+                            </div>
+                            <div class="progress" role="progressbar" style="height: .6rem">
+                                <div class="progress-bar @BarClass(role.IsOver, pct)" style="width: @(Math.Min(100, pct).ToString("0.#", usd))%"></div>
+                            </div>
+                            <div class="small mt-1 @(role.IsOver ? "text-danger" : "text-muted")">
+                                @(role.RemainingHours >= 0 ? $"{Hrs(role.RemainingHours)} hrs remaining" : $"{Hrs(-role.RemainingHours)} hrs over")
+                                @if (role.PendingHours > 0)
+                                {
+                                    <span>· @Hrs(role.PendingHours) hrs pending (open)</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Hours worked</div>
+            <div class="fs-3 fw-semibold">@Hrs(Model.Totals.HoursWorked)</div>
+            <div class="text-muted small">@Hrs(Model.Totals.HoursBilled) billed</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">WIP (approved)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.ApprovedValue)</div>
+            <div class="text-muted small">@Model.Totals.ApprovedCount entries un-invoiced</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Invoiced</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.InvoicedValue)</div>
+            <div class="text-muted small">@Model.Totals.InvoicedCount entries</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Pending (open)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.Totals.PendingValue)</div>
+            <div class="text-muted small">@Model.Totals.OpenCount entries awaiting approval</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card panel-card">
+            <div class="card-header">Hours &amp; value by billing role</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Role</th><th class="text-end">Worked</th><th class="text-end">Billed</th><th class="text-end pe-3">Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in Model.ByRole)
+                        {
+                            <tr>
+                                <td class="ps-3">@r.RoleName</td>
+                                <td class="text-end">@Hrs(r.HoursWorked)</td>
+                                <td class="text-end">@Hrs(r.HoursBilled)</td>
+                                <td class="text-end pe-3">@Money(r.Value)</td>
+                            </tr>
+                        }
+                        @if (Model.ByRole.Count == 0)
+                        {
+                            <tr><td colspan="4" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card panel-card">
+            <div class="card-header">Hours &amp; value by person</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Person</th><th class="text-end">Worked</th><th class="text-end">Billed</th><th class="text-end pe-3">Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in Model.ByPerson)
+                        {
+                            <tr>
+                                <td class="ps-3">@p.EmployeeName</td>
+                                <td class="text-end">@Hrs(p.HoursWorked)</td>
+                                <td class="text-end">@Hrs(p.HoursBilled)</td>
+                                <td class="text-end pe-3">@Money(p.Value)</td>
+                            </tr>
+                        }
+                        @if (Model.ByPerson.Count == 0)
+                        {
+                            <tr><td colspan="4" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-12">
+        <div class="card panel-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Billing</span>
+                <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@Model.Project.Id">Edit billing</a>
+            </div>
+            <div class="card-body">
+                @{ var b = Model.Billing; var addr = b.Address; }
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="text-muted small text-uppercase">Contact</div>
+                        <div>@(string.IsNullOrWhiteSpace(b.ContactName) ? "—" : b.ContactName)</div>
+                        @if (!string.IsNullOrWhiteSpace(b.ContactEmail))
+                        {
+                            <div class="text-muted small">@b.ContactEmail</div>
+                        }
+                        <span class="badge @(b.ContactFromProject ? "text-bg-primary" : "text-bg-light text-muted") mt-1">
+                            @(b.ContactFromProject ? "project" : "client default")
+                        </span>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-muted small text-uppercase">Address</div>
+                        @if (addr is null)
+                        {
+                            <div>—</div>
+                        }
+                        else
+                        {
+                            @if (!string.IsNullOrWhiteSpace(addr.Line1)) { <div>@addr.Line1</div> }
+                            @if (!string.IsNullOrWhiteSpace(addr.Line2)) { <div>@addr.Line2</div> }
+                            <div>@($"{addr.City} {addr.State} {addr.PostalCode}".Trim())</div>
+                        }
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-muted small text-uppercase">Payment terms</div>
+                        <div>Net @b.PaymentTermsDays</div>
+                        <span class="badge @(b.TermsFromProject ? "text-bg-primary" : "text-bg-light text-muted") mt-1">
+                            @(b.TermsFromProject ? "project" : "client default")
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card panel-card">
+            <div class="card-header">Team</div>
+            <ul class="list-group list-group-flush">
+                @foreach (var t in Model.Team.Where(t => t.Assignment.EndDate is null))
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>@t.EmployeeName</span>
+                        @if (t.DefaultRoleName is not null)
+                        {
+                            <span class="badge text-bg-light text-muted">@t.DefaultRoleName</span>
+                        }
+                    </li>
+                }
+                @if (!Model.Team.Any(t => t.Assignment.EndDate is null))
+                {
+                    <li class="list-group-item text-muted">No active assignments.</li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card panel-card">
+            <div class="card-header">Recent activity</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th class="ps-3">Date</th><th>Person</th><th>Role</th><th class="text-end">Worked</th><th class="pe-3">Status</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Model.Recent)
+                        {
+                            <tr>
+                                <td class="ps-3 text-nowrap">@e.Date.ToString("MMM d")</td>
+                                <td>@e.EmployeeName</td>
+                                <td>@e.RoleName @(!e.IsBillable ? "•" : "")</td>
+                                <td class="text-end">@Hrs(e.HoursWorked)</td>
+                                <td class="pe-3">
+                                    <span class="badge @(e.Status switch {
+                                        TimeEntryStatus.Open => "text-bg-warning-subtle text-warning-emphasis border border-warning-subtle",
+                                        TimeEntryStatus.Approved => "text-bg-success-subtle text-success-emphasis border border-success-subtle",
+                                        _ => "text-bg-secondary" })">@e.Status.ToString().ToLowerInvariant()</span>
+                                </td>
+                            </tr>
+                        }
+                        @if (Model.Recent.Count == 0)
+                        {
+                            <tr><td colspan="5" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

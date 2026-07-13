@@ -1,0 +1,37 @@
+@using System.Security.Claims
+@using Waypoint.Web
+@{
+    ViewData["Title"] = "My Account";
+    var employeeId = User.GetEmployeeId();
+    var roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+}
+
+<h1>My Account</h1>
+
+<dl class="row">
+    <dt class="col-sm-3">Name</dt>
+    <dd class="col-sm-9">@User.Identity?.Name</dd>
+
+    <dt class="col-sm-3">Email</dt>
+    <dd class="col-sm-9">@User.FindFirstValue("preferred_username")</dd>
+
+    <dt class="col-sm-3">Employee ID</dt>
+    <dd class="col-sm-9"><code>@(employeeId?.ToString() ?? "not provisioned")</code></dd>
+
+    <dt class="col-sm-3">Roles</dt>
+    <dd class="col-sm-9">
+        @if (roles.Count > 0)
+        {
+            @foreach (var role in roles)
+            {
+                <span class="badge text-bg-primary me-1">@role</span>
+            }
+        }
+        else
+        {
+            <span class="text-muted">No roles granted yet — an Admin or Operations Manager must grant access.</span>
+        }
+    </dd>
+</dl>
+
+<p class="text-muted">Role changes take effect at your next sign-in.</p>

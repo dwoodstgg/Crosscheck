@@ -1,4 +1,4 @@
-# Project Tango — Claude Code Context
+# Waypoint — Claude Code Context
 
 Time tracking, project budgeting, and invoicing app for The Geospatial Group.
 **Read `design-doc.md` in the repo root before making architectural changes — it is the source of truth.**
@@ -6,7 +6,7 @@ Time tracking, project budgeting, and invoicing app for The Geospatial Group.
 ## Stack (decided — do not substitute)
 - .NET 10, ASP.NET Core (single host: MVC/Razor UI + `/api/v1` REST controllers)
 - Bootstrap 5.3.x (latest) for all UI
-- PostgreSQL via **Dapper + Npgsql — NO EF Core / no ORM**. Schema is versioned as plain SQL scripts run by DbUp (embedded resources in `Infrastructure/Persistence/Scripts/`, journaled in `schemaversions`). Apply with `dotnet run --project src/ProjectTango.Web -- migrate`; Development auto-migrates on startup (`Database:MigrateOnStartup`). Local dev DB: native PostgreSQL on 5432 (docker-compose fallback on 5433)
+- PostgreSQL via **Dapper + Npgsql — NO EF Core / no ORM**. Schema is versioned as plain SQL scripts run by DbUp (embedded resources in `Infrastructure/Persistence/Scripts/`, journaled in `schemaversions`). Apply with `dotnet run --project src/Waypoint.Web -- migrate`; Development auto-migrates on startup (`Database:MigrateOnStartup`). Local dev DB: native PostgreSQL on 5432 (docker-compose fallback on 5433)
 - Auth: Microsoft Entra ID, single tenant (thegeospatialgroup.com), Microsoft.Identity.Web (cookies for UI, JWT bearer for API)
 - Excel import: ClosedXML. PDF generation: QuestPDF
 - Hosting target: AWS (ECS Fargate, RDS PostgreSQL, S3, SQS)
@@ -14,15 +14,15 @@ Time tracking, project budgeting, and invoicing app for The Geospatial Group.
 
 ## Solution layout
 ```
-ProjectTango.slnx
-├── src/ProjectTango.Domain          entities, enums, domain rules (no deps)
-├── src/ProjectTango.Application     services, use cases, validation, interfaces
-├── src/ProjectTango.Infrastructure  EF Core/Npgsql, migrations, S3, email, Excel import, PDF
-├── src/ProjectTango.Web             ASP.NET Core host: Razor UI + /api/v1 + auth
+Waypoint.slnx
+├── src/Waypoint.Domain          entities, enums, domain rules (no deps)
+├── src/Waypoint.Application     services, use cases, validation, interfaces
+├── src/Waypoint.Infrastructure  EF Core/Npgsql, migrations, S3, email, Excel import, PDF
+├── src/Waypoint.Web             ASP.NET Core host: Razor UI + /api/v1 + auth
 └── tests/{UnitTests,IntegrationTests}
 ```
-Local path: `C:\Users\dcwoo\source\repos\dwoodstgg\ProjectTango`
-Remote: https://github.com/dwoodstgg/ProjectTango
+Local path: `C:\Users\dcwoo\source\repos\dwoodstgg\Waypoint`
+Remote: https://github.com/dwoodstgg/Waypoint
 
 ## Domain rules that must never be violated
 1. Money is `numeric`/`decimal`, never float. Timestamps UTC. USD only. Tax column exists but is always 0 in v1.

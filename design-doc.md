@@ -77,27 +77,27 @@ Notes:
 
 **Backend: .NET 10 (ASP.NET Core).** ✅ *Decided.* First-class Entra ID integration via Microsoft.Identity.Web. A single ASP.NET Core solution hosts both the `/api/v1` endpoints and the web UI.
 
-**Data access: Dapper + Npgsql — no ORM.** ✅ *Decided (2026-07-08, revised from EF Core).* Repositories in Infrastructure use Dapper over Npgsql. The schema is plain SQL: numbered scripts embedded in the Infrastructure assembly, applied in order by **DbUp** and journaled in `schemaversions`. Run via `dotnet run --project src/ProjectTango.Web -- migrate` (CI/deploy) or automatically at startup in Development.
+**Data access: Dapper + Npgsql — no ORM.** ✅ *Decided (2026-07-08, revised from EF Core).* Repositories in Infrastructure use Dapper over Npgsql. The schema is plain SQL: numbered scripts embedded in the Infrastructure assembly, applied in order by **DbUp** and journaled in `schemaversions`. Run via `dotnet run --project src/Waypoint.Web -- migrate` (CI/deploy) or automatically at startup in Development.
 
 **Frontend: ASP.NET Core MVC (Razor) + Bootstrap 5.3.x (latest).** Server-rendered Razor views styled with Bootstrap, with targeted JavaScript/fetch against the API for the interactive pieces (timesheet grid, dashboards). All views call the same application services the API exposes, so nothing is UI-only. If we later want richer interactivity, Blazor components can be added incrementally without changing the backend.
 
 **Database:** PostgreSQL on **Amazon RDS** (or Aurora PostgreSQL if we want easier scaling later). Schema managed by DbUp-versioned SQL scripts. Local dev uses the developer's native PostgreSQL install (browsable in pgAdmin); docker-compose provides a fallback on port 5433.
 
-**Solution structure** (local path `C:\Users\dcwoo\source\repos\dwoodstgg\ProjectTango`, remote `https://github.com/dwoodstgg/ProjectTango`):
+**Solution structure** (local path `C:\Users\dcwoo\source\repos\dwoodstgg\Waypoint`, remote `https://github.com/dwoodstgg/Waypoint`):
 
 ```
-ProjectTango.slnx
+Waypoint.slnx
 ├── src/
-│   ├── ProjectTango.Domain/          Entities, enums, domain rules (no dependencies)
-│   ├── ProjectTango.Application/     Services, use cases, validation, interfaces
-│   ├── ProjectTango.Infrastructure/  Dapper repositories (Npgsql), DbUp SQL
+│   ├── Waypoint.Domain/          Entities, enums, domain rules (no dependencies)
+│   ├── Waypoint.Application/     Services, use cases, validation, interfaces
+│   ├── Waypoint.Infrastructure/  Dapper repositories (Npgsql), DbUp SQL
 │   │                                 migrations, S3, email, Excel import
 │   │                                 (ClosedXML), PDF (QuestPDF)
-│   └── ProjectTango.Web/             ASP.NET Core host: MVC UI (Bootstrap 5.3)
+│   └── Waypoint.Web/             ASP.NET Core host: MVC UI (Bootstrap 5.3)
 │                                     + /api/v1 controllers + auth
 ├── tests/
-│   ├── ProjectTango.UnitTests/
-│   └── ProjectTango.IntegrationTests/ (Testcontainers Postgres)
+│   ├── Waypoint.UnitTests/
+│   └── Waypoint.IntegrationTests/ (Testcontainers Postgres)
 └── .github/workflows/                CI: build, test, migrate, deploy
 ```
 
@@ -463,7 +463,7 @@ Conventions: cursor pagination, RFC 7807 problem+json errors, idempotency keys o
 ## 9. Roadmap
 
 **Phase 1 — Foundation (MVP)**
-Solution scaffold at `C:\Users\dcwoo\source\repos\dwoodstgg\ProjectTango` pushed to `github.com/dwoodstgg/ProjectTango`. Auth (Entra ID), employees & roles (multi-role + Admin), clients, projects, rate cards, assignments, time entry + approval, basic project dashboard.
+Solution scaffold at `C:\Users\dcwoo\source\repos\dwoodstgg\Waypoint` pushed to `github.com/dwoodstgg/Waypoint`. Auth (Entra ID), employees & roles (multi-role + Admin), clients, projects, rate cards, assignments, time entry + approval, basic project dashboard.
 
 **Phase 2 — Money & Migration**
 Budgets + alerts, invoice generation + PDF, invoice lifecycle, WIP report, **Excel timesheet import** (needed early so historical 2026 data is in the system before first invoices), **project close-out & reopen**.

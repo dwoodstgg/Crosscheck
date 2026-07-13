@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Waypoint.Application\Waypoint.Application.csproj" />
+    <ProjectReference Include="..\Waypoint.Infrastructure\Waypoint.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.12.2" />
+    <PackageReference Include="Microsoft.Identity.Web.UI" Version="4.12.2" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.10.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>c7fd7f9e-210c-4da3-a44b-3628df6d881c</UserSecretsId>
+  </PropertyGroup>
+
+</Project>
