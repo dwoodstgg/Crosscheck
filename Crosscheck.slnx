@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Crosscheck.Application/Crosscheck.Application.csproj" />
+    <Project Path="src/Crosscheck.Domain/Crosscheck.Domain.csproj" />
+    <Project Path="src/Crosscheck.Infrastructure/Crosscheck.Infrastructure.csproj" />
+    <Project Path="src/Crosscheck.Web/Crosscheck.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Crosscheck.IntegrationTests/Crosscheck.IntegrationTests.csproj" />
+    <Project Path="tests/Crosscheck.UnitTests/Crosscheck.UnitTests.csproj" />
+  </Folder>
+</Solution>

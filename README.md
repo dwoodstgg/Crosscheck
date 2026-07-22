@@ -1,4 +1,4 @@
-# Waypoint
+# Crosscheck
 
 Time tracking, project budgeting, and invoicing for The Geospatial Group.
 
@@ -12,11 +12,11 @@ See **[design-doc.md](design-doc.md)** for the full design (source of truth) and
 
 Prereqs: .NET 10 SDK, Docker Desktop (for Testcontainers), PostgreSQL (native install or Docker).
 
-The app connects to `localhost:5432`, database `waypoint`, user `waypoint` (password in `appsettings.json`). On the primary dev machine that's the native PostgreSQL 18 install (data dir `C:\Program Files\PostgreSQL\18\data`, browsable in pgAdmin). One-time setup — run as the `postgres` superuser (pgAdmin Query Tool or psql):
+The app connects to `localhost:5432`, database `crosscheck`, user `crosscheck` (password in `appsettings.json`). On the primary dev machine that's the native PostgreSQL 18 install (data dir `C:\Program Files\PostgreSQL\18\data`, browsable in pgAdmin). One-time setup — run as the `postgres` superuser (pgAdmin Query Tool or psql):
 
 ```sql
-CREATE ROLE waypoint LOGIN PASSWORD 'waypoint@123';
-CREATE DATABASE waypoint OWNER waypoint;
+CREATE ROLE crosscheck LOGIN PASSWORD 'crosscheck@123';
+CREATE DATABASE crosscheck OWNER crosscheck;
 ```
 
 No native Postgres? `docker compose up -d` starts one on port **5433** (it avoids clashing with a native install); change `Port` in the connection string to match.
@@ -24,21 +24,21 @@ No native Postgres? `docker compose up -d` starts one on port **5433** (it avoid
 ```powershell
 dotnet build
 dotnet test                                          # integration tests spin up their own throwaway Postgres via Testcontainers
-dotnet run --project src/Waypoint.Web -- migrate # apply pending SQL scripts (also runs automatically on dev startup)
-dotnet run --project src/Waypoint.Web
+dotnet run --project src/Crosscheck.Web -- migrate # apply pending SQL scripts (also runs automatically on dev startup)
+dotnet run --project src/Crosscheck.Web
 ```
 
-Schema lives in [src/Waypoint.Infrastructure/Persistence/Scripts](src/Waypoint.Infrastructure/Persistence/Scripts) as numbered SQL files; DbUp applies pending ones in order and records them in the `schemaversions` table. Never edit a script that has already shipped — add a new one.
+Schema lives in [src/Crosscheck.Infrastructure/Persistence/Scripts](src/Crosscheck.Infrastructure/Persistence/Scripts) as numbered SQL files; DbUp applies pending ones in order and records them in the `schemaversions` table. Never edit a script that has already shipped — add a new one.
 
-Entra ID: `AzureAd:TenantId` and `AzureAd:ClientId` in `src/Waypoint.Web/appsettings.json` are placeholders until the app registration exists in the thegeospatialgroup.com tenant. The app runs without them; sign-in won't work until they're real.
+Entra ID: `AzureAd:TenantId` and `AzureAd:ClientId` in `src/Crosscheck.Web/appsettings.json` are placeholders until the app registration exists in the thegeospatialgroup.com tenant. The app runs without them; sign-in won't work until they're real.
 
 ## Solution layout
 
 ```
-src/Waypoint.Domain          entities, enums, domain rules (no dependencies)
-src/Waypoint.Application     services, use cases, validation, interfaces
-src/Waypoint.Infrastructure  EF Core/Npgsql, migrations, S3, email, Excel import, PDF
-src/Waypoint.Web             ASP.NET Core host: Razor UI + /api/v1 + auth
-tests/Waypoint.UnitTests
-tests/Waypoint.IntegrationTests   (Testcontainers Postgres)
+src/Crosscheck.Domain          entities, enums, domain rules (no dependencies)
+src/Crosscheck.Application     services, use cases, validation, interfaces
+src/Crosscheck.Infrastructure  EF Core/Npgsql, migrations, S3, email, Excel import, PDF
+src/Crosscheck.Web             ASP.NET Core host: Razor UI + /api/v1 + auth
+tests/Crosscheck.UnitTests
+tests/Crosscheck.IntegrationTests   (Testcontainers Postgres)
 ```

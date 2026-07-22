@@ -1,0 +1,265 @@
+@using System.Globalization
+@using Crosscheck.Application.Projects
+@using Crosscheck.Domain.Enums
+@model ProjectManageViewModel
+@{
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C0", usd);
+    string Hrs(decimal h) => h.ToString("0.##");
+
+    var project = Model.Project;
+    var label = project.BreakdownLabel;
+    var one = Terminology.Singular(label);        // "module" | "milestone"
+    var many = Terminology.Plural(label);
+    var oneTitle = Terminology.SingularTitle(label);
+    var manyTitle = Terminology.PluralTitle(label);
+    var isMilestone = label == BreakdownLabel.Milestone;
+
+    string DisplayName(Crosscheck.Domain.Entities.ProjectModule m) =>
+        isMilestone ? $"{m.SortOrder}. {m.Name}" : m.Name;
+
+    var totalHours = Model.Modules.Sum(m => m.Module.EffectiveHours);
+    var projectRateByRole = Model.Rates.ToDictionary(r => r.RateCard.RoleId, r => r.RateCard.HourlyRate);
+}
+
+<div class="card panel-card mt-4 mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>@manyTitle</span>
+        @if (Model.Modules.Count > 0)
+        {
+            <span class="badge text-bg-secondary">@Hrs(totalHours) hrs total</span>
+        }
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-2">
+            Break the work order into @many, each with its own hour budget — flat hours or hours
+            by role — plus optional rate overrides and an agreed fixed amount. Once a project has
+            @many, every new time entry picks one, and burn is tracked per @one.
+            @if (Model.Budget is null && Model.Modules.Count > 0)
+            {
+                <strong>Set a budget above to activate threshold email alerts for these @many.</strong>
+            }
+        </p>
+
+        @if (Model.Modules.Count == 0)
+        {
+            <p class="text-muted small fst-italic mb-3">No @many yet — time entry works project-wide until one is added.</p>
+        }
+
+        @foreach (var summary in Model.Modules)
+        {
+            var m = summary.Module;
+            var editId = $"module-edit-{m.Id}";
+            var allocByRole = m.Allocations.ToDictionary(a => a.RoleId, a => a.Hours);
+            <div class="border rounded p-2 mb-2">
+                <div class="d-flex justify-content-between align-items-center gap-2">
+                    <div>
+                        <span class="fw-semibold">@DisplayName(m)</span>
+                        @if (m.IsFixedPrice)
+                        {
+                            <span class="badge text-bg-info ms-1" title="Bills the agreed amount — hours are internal budgeting">Fixed @Money(m.Amount!.Value)</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-light border ms-1" title="Bills hours × rate as incurred">T&amp;M</span>
+                        }
+                        <div class="text-muted small">
+                            @Hrs(m.EffectiveHours) hrs
+                            @if (m.Hours is null && m.Allocations.Count > 0)
+                            {
+                                <span>(@string.Join(", ", m.Allocations.OrderBy(a => a.RoleName).Select(a => $"{a.RoleName} {Hrs(a.Hours)}")))</span>
+                            }
+                            @if (summary.PlannedValue is { } planned)
+                            {
+                                <span>· planned value @Money(planned)</span>
+                            }
+                            @foreach (var rate in summary.Rates)
+                            {
+                                <span>· @(rate.RoleName ?? "all roles") @rate.Rate.HourlyRate.ToString("C2")/hr</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false">Edit</button>
+                        <form asp-action="DeleteModule" asp-route-id="@project.Id" method="post" class="d-inline"
+                              onsubmit="return confirm('@(summary.HasLoggedTime
+                                  ? $"Remove this {one}? Time has been logged against it — those entries keep their hours and pricing, and it shows as removed in reports. New time can no longer pick it."
+                                  : $"Remove this {one}? No time has been logged against it.")');">
+                            <input type="hidden" name="moduleId" value="@m.Id" />
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="collapse mt-2" id="@editId">
+                    <div class="bg-body-tertiary rounded p-2">
+                        <form asp-action="RenameModule" asp-route-id="@project.Id" method="post" class="row g-2 align-items-end mb-3">
+                            <input type="hidden" name="moduleId" value="@m.Id" />
+                            <div class="col-auto">
+                                <label class="form-label small mb-1">Name</label>
+                                <input name="name" value="@m.Name" class="form-control form-control-sm" style="width: 16rem" required />
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">Rename</button>
+                            </div>
+                        </form>
+
+                        <form asp-action="SetModuleBudget" asp-route-id="@project.Id" method="post" class="mb-3">
+                            <input type="hidden" name="moduleId" value="@m.Id" />
+                            <div class="row g-2">
+                                <div class="col-6 col-lg-3">
+                                    <label class="form-label small mb-1">Flat hours</label>
+                                    <input name="moduleHours" type="number" step="0.25" min="0" class="form-control form-control-sm"
+                                           value="@(m.Hours?.ToString("0.##"))" placeholder="from roles" />
+                                </div>
+                                <div class="col-6 col-lg-3">
+                                    <label class="form-label small mb-1">Agreed amount <span class="text-muted">(fixed-price)</span></label>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text">$</span>
+                                        <input name="moduleAmount" type="number" step="0.01" min="0" class="form-control"
+                                               value="@(m.Amount?.ToString("0.##"))" placeholder="T&M" />
+                                        @if (summary.PlannedValue is { } prefill)
+                                        {
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                    title="Fill with the planned value (Σ hours × rates)"
+                                                    onclick="this.closest('.input-group').querySelector('input').value='@prefill.ToString("0.##", CultureInfo.InvariantCulture)'">
+                                                use @Money(prefill)
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="text-muted small">
+                                        Hours by role — leave all blank and set flat hours for a single figure
+                                        (flat hours win when both are set). Amount set = client is billed exactly
+                                        that; blank = bills hourly as incurred.
+                                    </div>
+                                </div>
+                                @foreach (var option in Model.BillableRoleOptions)
+                                {
+                                    var value = Guid.TryParse(option.Value, out var rid) && allocByRole.TryGetValue(rid, out var h)
+                                        ? h.ToString("0.##")
+                                        : "";
+                                    <div class="col-6 col-lg-4 d-flex align-items-center gap-2">
+                                        <label class="form-label small mb-0 flex-grow-1 text-truncate" for="moduleRoleHours-@m.Id-@option.Value">@option.Text</label>
+                                        <input id="moduleRoleHours-@m.Id-@option.Value" name="moduleRoleHours[@option.Value]" type="number" step="0.25" min="0"
+                                               value="@value" placeholder="—" class="form-control form-control-sm" style="width: 6rem" />
+                                    </div>
+                                }
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-sm btn-primary">Save @one budget</button>
+                                </div>
+                            </div>
+                        </form>
+
+                        <div class="text-muted small text-uppercase mb-1">Rate overrides</div>
+                        <p class="text-muted small mb-2">
+                            Only needed when this @one bills differently from the project rate card.
+                            An "all roles" rate prices every role on this @one (e.g. maintenance at $85/hr).
+                        </p>
+                        <table class="table table-sm align-middle mb-2">
+                            <tbody>
+                                @foreach (var rate in summary.Rates)
+                                {
+                                    var r = rate.Rate;
+                                    var rateEditId = $"module-rate-edit-{r.Id}";
+                                    <tr>
+                                        <td>@(rate.RoleName ?? "All roles")</td>
+                                        <td class="text-end">@r.HourlyRate.ToString("C2")/hr</td>
+                                        <td class="text-end text-nowrap">
+                                            @if (rate.HasBilledTime)
+                                            {
+                                                <span class="text-muted small" title="Invoiced time is billed at this rate — void the invoice to change it">🔒 billed</span>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        data-bs-toggle="collapse" data-bs-target="#@rateEditId" aria-expanded="false">Edit</button>
+                                                <form asp-action="DeleteModuleRate" asp-route-id="@project.Id" method="post" class="d-inline"
+                                                      onsubmit="return confirm('Remove this rate override? Logged time falls back to the next rate in line (all-roles override or the project rate).');">
+                                                    <input type="hidden" name="moduleRateId" value="@r.Id" />
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                </form>
+                                            }
+                                        </td>
+                                    </tr>
+                                    @if (!rate.HasBilledTime)
+                                    {
+                                        <tr class="collapse" id="@rateEditId">
+                                            <td colspan="3">
+                                                <form asp-action="CorrectModuleRate" asp-route-id="@project.Id" method="post" class="row g-2 align-items-end">
+                                                    <input type="hidden" name="moduleRateId" value="@r.Id" />
+                                                    <div class="col-auto">
+                                                        <label class="form-label small mb-1">Hourly rate</label>
+                                                        <input name="hourlyRate" type="number" step="0.01" min="0" value="@r.HourlyRate.ToString("0.00")"
+                                                               class="form-control form-control-sm" style="width: 8rem" required />
+                                                    </div>
+                                                    <div class="col-auto">
+                                                        <button type="submit" class="btn btn-sm btn-primary">Apply correction</button>
+                                                    </div>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                        <form asp-action="SetModuleRate" asp-route-id="@project.Id" method="post" class="row g-2 align-items-end">
+                            <input type="hidden" name="moduleId" value="@m.Id" />
+                            <div class="col-auto">
+                                <label class="form-label small mb-1">Role</label>
+                                <select name="roleId" class="form-select form-select-sm">
+                                    <option value="">All roles</option>
+                                    @foreach (var option in Model.BillableRoleOptions)
+                                    {
+                                        <option value="@option.Value">@option.Text</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label small mb-1">Hourly rate</label>
+                                <input name="hourlyRate" type="number" step="0.01" min="0" class="form-control form-control-sm" style="width: 8rem" required />
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Add override</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="inline-add">
+            <div class="inline-add-title">Add @one</div>
+            <form asp-action="AddModule" asp-route-id="@project.Id" method="post" class="row g-2">
+                <div class="col-12 col-lg-5">
+                    <label class="form-label small mb-1">Name</label>
+                    <input name="name" class="form-control form-control-sm" placeholder="e.g. @(isMilestone ? "Cost Share – Funded Projects Tool" : "Ag Chem")" required />
+                </div>
+                <div class="col-6 col-lg-3">
+                    <label class="form-label small mb-1">Flat hours <span class="text-muted">(optional)</span></label>
+                    <input name="moduleHours" type="number" step="0.25" min="0" class="form-control form-control-sm" placeholder="or use roles" />
+                </div>
+                <div class="col-6 col-lg-3">
+                    <label class="form-label small mb-1">Agreed amount <span class="text-muted">(optional)</span></label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">$</span>
+                        <input name="moduleAmount" type="number" step="0.01" min="0" class="form-control" placeholder="T&M" />
+                    </div>
+                </div>
+                @foreach (var option in Model.BillableRoleOptions)
+                {
+                    <div class="col-6 col-lg-4 d-flex align-items-center gap-2">
+                        <label class="form-label small mb-0 flex-grow-1 text-truncate" for="add-moduleRoleHours-@option.Value">@option.Text hrs</label>
+                        <input id="add-moduleRoleHours-@option.Value" name="moduleRoleHours[@option.Value]" type="number" step="0.25" min="0"
+                               placeholder="—" class="form-control form-control-sm" style="width: 6rem" />
+                    </div>
+                }
+                <div class="col-12">
+                    <button type="submit" class="btn btn-sm btn-primary">Add @one</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

@@ -77,27 +77,27 @@ Notes:
 
 **Backend: .NET 10 (ASP.NET Core).** ✅ *Decided.* First-class Entra ID integration via Microsoft.Identity.Web. A single ASP.NET Core solution hosts both the `/api/v1` endpoints and the web UI.
 
-**Data access: Dapper + Npgsql — no ORM.** ✅ *Decided (2026-07-08, revised from EF Core).* Repositories in Infrastructure use Dapper over Npgsql. The schema is plain SQL: numbered scripts embedded in the Infrastructure assembly, applied in order by **DbUp** and journaled in `schemaversions`. Run via `dotnet run --project src/Waypoint.Web -- migrate` (CI/deploy) or automatically at startup in Development.
+**Data access: Dapper + Npgsql — no ORM.** ✅ *Decided (2026-07-08, revised from EF Core).* Repositories in Infrastructure use Dapper over Npgsql. The schema is plain SQL: numbered scripts embedded in the Infrastructure assembly, applied in order by **DbUp** and journaled in `schemaversions`. Run via `dotnet run --project src/Crosscheck.Web -- migrate` (CI/deploy) or automatically at startup in Development.
 
 **Frontend: ASP.NET Core MVC (Razor) + Bootstrap 5.3.x (latest).** Server-rendered Razor views styled with Bootstrap, with targeted JavaScript/fetch against the API for the interactive pieces (timesheet grid, dashboards). All views call the same application services the API exposes, so nothing is UI-only. If we later want richer interactivity, Blazor components can be added incrementally without changing the backend.
 
 **Database:** PostgreSQL on **Amazon RDS** (or Aurora PostgreSQL if we want easier scaling later). Schema managed by DbUp-versioned SQL scripts. Local dev uses the developer's native PostgreSQL install (browsable in pgAdmin); docker-compose provides a fallback on port 5433.
 
-**Solution structure** (local path `C:\Users\dcwoo\source\repos\dwoodstgg\Waypoint`, remote `https://github.com/dwoodstgg/Waypoint`):
+**Solution structure** (local path `C:\Users\dcwoo\source\repos\dwoodstgg\Crosscheck`, remote `https://github.com/dwoodstgg/Crosscheck`):
 
 ```
-Waypoint.slnx
+Crosscheck.slnx
 ├── src/
-│   ├── Waypoint.Domain/          Entities, enums, domain rules (no dependencies)
-│   ├── Waypoint.Application/     Services, use cases, validation, interfaces
-│   ├── Waypoint.Infrastructure/  Dapper repositories (Npgsql), DbUp SQL
+│   ├── Crosscheck.Domain/          Entities, enums, domain rules (no dependencies)
+│   ├── Crosscheck.Application/     Services, use cases, validation, interfaces
+│   ├── Crosscheck.Infrastructure/  Dapper repositories (Npgsql), DbUp SQL
 │   │                                 migrations, S3, email, Excel import
 │   │                                 (ClosedXML), PDF (QuestPDF)
-│   └── Waypoint.Web/             ASP.NET Core host: MVC UI (Bootstrap 5.3)
+│   └── Crosscheck.Web/             ASP.NET Core host: MVC UI (Bootstrap 5.3)
 │                                     + /api/v1 controllers + auth
 ├── tests/
-│   ├── Waypoint.UnitTests/
-│   └── Waypoint.IntegrationTests/ (Testcontainers Postgres)
+│   ├── Crosscheck.UnitTests/
+│   └── Crosscheck.IntegrationTests/ (Testcontainers Postgres)
 └── .github/workflows/                CI: build, test, migrate, deploy
 ```
 
@@ -148,13 +148,15 @@ Client 1──* Project 1──* ProjectRateCard (role → rate)
                  │
                  ├──* ProjectAssignment (employee + optional default billing role)
                  │
-                 ├──* Milestone (fixed-fee billing checkpoints)
+                 ├──* ProjectModule (work-order breakdown: "modules"/"milestones")
+                 │            1──* ModuleRoleAllocation (role → hours)
+                 │            1──* ProjectModuleRate (role? → rate override)
                  │
                  ├──* Task (optional breakdown)
                  │
                  └──* TimeEntry *──1 Employee
                  │            *──1 Role (billing role, chosen per entry)
-                 │            *──1 Milestone (optional, fixed-fee in-scope work)
+                 │            *──0..1 ProjectModule (required once the project has modules)
                  │
                  ├──1 Budget (+ BudgetRevision history)
                  │
@@ -219,6 +221,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | project_manager_id | uuid FK → employees | |
 | start_date / end_date | date | |
 | currency | char(3) | USD default |
+| breakdown_label | enum | module (default), milestone — what this work order calls its budget sections; display only, mechanics identical (decision #21) |
 | billing_contact_name / email | text null | Overrides the client's default contact when set |
 | billing_address | jsonb null | Overrides the client's default address when set |
 | payment_terms_days | int null | Overrides the client's default terms when set |
@@ -233,7 +236,32 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | deleted_at | timestamptz null | Soft delete (rule 11) |
 | unique (project_id, role_id) where deleted_at is null | | One live rate per role |
 
-> Rates are fixed for the life of a project — one live row per (project, billing role), set from the contract. Rate resolution: a time entry bills at the rate for (project, the **entry's** billing role). Editing a rate is for fixing a mistaken entry, not a rate change, and is locked once the rate has priced invoiced time. Invoiced entries lock their rate permanently (denormalized onto the invoice line), independent of any later rate-card edit. No overtime multipliers: "Extended Work Week" hours bill at the same stored rate.
+> Rates are fixed for the life of a project — one live row per (project, billing role), set from the contract. Rate resolution: a time entry bills at the module's per-role override when one exists, else the module-wide override, else the (project, the **entry's** billing role) rate-card row. Editing a rate is for fixing a mistaken entry, not a rate change, and is locked once the rate has priced invoiced time. Invoiced entries lock their rate permanently (denormalized onto the invoice line), independent of any later rate-card edit. No overtime multipliers: "Extended Work Week" hours bill at the same stored rate.
+
+**project_modules** — the work order's budget breakdown (decision #21): named sections ("Ag Chem", "Supplemental Hours") or numbered milestones (NRIS level-of-effort), per project
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| project_id | uuid FK | + `UNIQUE (id, project_id)` so time_entries can enforce module-belongs-to-project |
+| name | text | Unique live name per project (case-insensitive, partial index) |
+| sort_order | int | Milestone-labeled projects display it as the number ("5. DMAP – Bug Fixes") |
+| hours | numeric(9,2) null | Explicit flat hour budget; null = effective hours derive from Σ role allocations |
+| amount | numeric(12,2) null | Agreed fixed billing amount. Set = **fixed-price**: the client is billed exactly this, hours are internal budgeting, entries approve without a rate. Null = **T&M**: bills hours × resolved rate as incurred |
+| deleted_at | timestamptz null | Soft delete only — entries stay attached, burn shows "(removed)", name frees up |
+
+**project_module_allocations** — per-role hours within a module (mirrors budget_role_allocations)
+| module_id FK CASCADE, role_id FK, hours numeric(9,2), `UNIQUE (module_id, role_id)` |
+
+**project_module_rates** — per-module rate overrides
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| module_id | uuid FK | |
+| role_id | uuid FK null | **Null = module-wide** — any role bills this rate on the module (e.g. maintenance at $85/hr) |
+| hourly_rate | numeric(10,2) | |
+| deleted_at | timestamptz null | Live-row unique index `(module_id, role_id) NULLS NOT DISTINCT WHERE deleted_at IS NULL` |
+
+> With live modules, per-role hour budgets live **per module** and the project totals roll up at read time: project hours budget = Σ module effective hours; per-role project totals = per-role sums across modules; the budget's own `budget_role_allocations` are rejected while modules exist. The dollar budget (`budgets.amount`) stays explicit — the contract figure, never derived. Burn, dashboards, and threshold email alerts run at **three** levels: overall, per role, and per module (alert keys `module:<id>:pct:<n>` / `module:<id>:overrun`, re-armed per module when its numbers change).
 
 **project_assignments** — who is on the project (membership, not billing role)
 | Column | Type | Notes |
@@ -268,18 +296,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 
 **budget_revisions** — audit trail of every budget change (who, when, old → new, reason).
 
-**milestones** — fixed-fee billing checkpoints, defined per project
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| project_id | uuid FK | |
-| name | text | |
-| amount | numeric(12,2) | Portion of the fixed fee billed when this milestone is invoiced |
-| target_date | date null | |
-| status | enum | planned, ready_to_bill, billed |
-| sort_order | int | |
-
-> On fixed-fee projects, employees attach in-scope entries to a milestone; entries left unattached are **out-of-scope** and bill hourly at their own rate. (Exact out-of-scope rate modeling — single project rate vs. per-role rate-card rows — is still open, see §10.)
+> **Fixed-fee milestones are absorbed into `project_modules`** (decision #21, superseding the earlier standalone `milestones` table design): a module with `amount` set IS a fixed-price milestone — employees attach entries to it, hours track the internal budget, and billing charges the agreed amount. The `planned → ready_to_bill → billed` status workflow (and `target_date`, if wanted) will be added to `project_modules` with the invoicing build. Out-of-scope/supplemental work is just another module with `amount` null (T&M), billing hourly at its own override or the project rate — this also resolves the old out-of-scope-rate open question.
 
 **company_holidays** — admin-managed holiday calendar (date, name). Drives holiday rows on timesheets and reconciles imported leave.
 
@@ -292,7 +309,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | id | uuid PK | |
 | project_id | uuid FK | |
 | task_id | uuid FK null | |
-| milestone_id | uuid FK null | Fixed-fee projects: set = in-scope milestone work; null = out-of-scope, bills hourly |
+| module_id | uuid FK null | Required (service-enforced) once the project has live modules; null on non-modular projects and on pre-module ("unassigned") entries. Composite FK (module_id, project_id) keeps the module the project's own. Cell uniqueness: `UNIQUE NULLS NOT DISTINCT (employee_id, project_id, module_id, entry_date)` |
 | employee_id | uuid FK | |
 | billing_role_id | uuid FK → roles | Chosen per entry — the type of work can change with each entry |
 | entry_date | date | |
@@ -360,19 +377,19 @@ Imported time entries carry `import_id` (nullable FK on time_entries) so any imp
 
 **No submission step.** Employees record time as they go and can edit freely — including back-dating entries they forgot — until the admin closes the period window or the entry is approved.
 
-1. Employee opens the **monthly** timesheet grid (projects × days, matching the current workbook layout), enters hours + notes, and picks the **billing role per entry** (pre-filled from their assignment default). On fixed-fee projects they can optionally attach the entry to a milestone; unattached entries are out-of-scope and bill hourly.
+1. Employee opens the **monthly** timesheet grid (projects × days, matching the current workbook layout), enters hours + notes, and picks the **billing role per entry** (pre-filled from their assignment default). A project broken into modules/milestones shows **one grid row per section** ("MDEQ – WO7 — Ag Chem"), so the flow is project → module → hours → description and two sections can be logged the same day; a module is required on new entries once the project has any. Pre-module entries show as a read-only "(unassigned)" row.
 2. Entries **auto-approve on save** (small-shop default, decided 2026-07-09 — see §10 #19): a billable entry moves straight to `approved` as soon as a rate card covers its (project, billing role); if none does yet it stays `open` and shows in the approval queue until a rate is added. Non-billable (leave/internal) time always auto-approves. Entries remain owner-editable — auto-approval does not lock them. Periods are **semi-monthly** (1st–15th, 16th–EOM); Ops/Admin **closes the window** after each period ends (`timesheet_periods`), which locks employee edits for those dates. Closing/reopening a window is audited; reopening is how a straggler fixes a missed day after close.
 3. The manual approval path stays available (not required by default): an approver can un-approve and re-approve to make the billing decision — `hours_billed` can be adjusted (worked 8, bill 6); `hours_worked` is never changed. Retained so the review step can be re-enabled per policy later.
 4. An approver can return an entry for correction with a comment (back to `open`, audited).
 
 ### 6.2 Budget Monitoring
-- Project dashboard shows: budget, hours/dollars burned (approved/invoiced, with `open` entries shown as "pending"), remaining, burn rate, projected completion vs. budget.
-- Automated alerts (email) to PM at configured thresholds; Ops Manager alerted at 90%+ and overrun.
+- Project dashboard shows: budget, hours/dollars burned (approved/invoiced, with `open` entries shown as "pending"), remaining, burn rate, projected completion vs. budget — plus a **per-module** burn section (spent vs. allocated hours per module, incl. "unassigned" and removed-module buckets; fixed-price modules show the agreed amount with value-at-rates marked internal).
+- Automated alerts (email) to PM at configured thresholds; Ops Manager alerted at 90%+ and overrun. Alerts fire at all three levels — overall, per role, per module — each key once until re-armed (budget revision re-arms everything; a module edit re-arms only that module's keys). Modules on a budget-less project don't alert (dedupe hangs off the budget row) — set any budget to activate them.
 
 ### 6.3 Invoicing
 1. PM (or Ops) selects project + date range → system pulls approved, un-invoiced billable entries (quantities use `hours_billed`).
 2. Draft invoice generated; lines grouped by role (or task), rates snapshotted.
-3. **Fixed-fee projects:** lines come from milestones marked `ready_to_bill` (billed at the milestone amount, not hours); out-of-scope entries add T&M lines at the out-of-scope hourly rate.
+3. **Fixed-price modules/milestones:** lines bill the module's agreed `amount`, never hours × rate (`ready_to_bill` workflow lands with this build); T&M modules bill hourly at the entry's **resolved** rate (module override else project card) — the invoice line snapshots that resolved rate. Lines will want module attribution/grouping.
 4. PM can exclude entries or add manual line items (e.g., expenses — v1.1) before finalizing.
 5. Ops Manager issues the invoice → number assigned, PDF rendered (background job), stored in S3, time entries locked to `invoiced`.
 6. Status tracked manually (`issued` → `paid`). Only issued invoices can be voided; voiding returns entries to `approved`. Accounting-system integration (QuickBooks etc.) is a future consideration.
@@ -463,7 +480,7 @@ Conventions: cursor pagination, RFC 7807 problem+json errors, idempotency keys o
 ## 9. Roadmap
 
 **Phase 1 — Foundation (MVP)**
-Solution scaffold at `C:\Users\dcwoo\source\repos\dwoodstgg\Waypoint` pushed to `github.com/dwoodstgg/Waypoint`. Auth (Entra ID), employees & roles (multi-role + Admin), clients, projects, rate cards, assignments, time entry + approval, basic project dashboard.
+Solution scaffold at `C:\Users\dcwoo\source\repos\dwoodstgg\Crosscheck` pushed to `github.com/dwoodstgg/Crosscheck`. Auth (Entra ID), employees & roles (multi-role + Admin), clients, projects, rate cards, assignments, time entry + approval, basic project dashboard.
 
 **Phase 2 — Money & Migration**
 Budgets + alerts, invoice generation + PDF, invoice lifecycle, WIP report, **Excel timesheet import** (needed early so historical 2026 data is in the system before first invoices), **project close-out & reopen**.
@@ -500,12 +517,14 @@ Mobile app (.NET MAUI or React Native — time entry + approvals on the go), des
 18. **Billing contact & terms location** ✅ (revised 2026-07-08) Per **project**, not client. Billing contact, address, and payment terms live on the project (all nullable); the client keeps the same fields as **defaults**. Effective value resolves field-by-field project → client → default (terms default 30). Motivated by one client having several concurrent projects with different departmental contacts.
 20. **Per-role hour budgets** ✅ (2026-07-10) A project budget can carry **per-role hour allocations** (e.g. Lead Developer 300h, PM 10h) alongside the overall dollar/hours budget — the two levels are independent, so a fixed-dollar project can still allocate and track hours by role. Allocations are in hours (dollars derive from the rate card); overall hours default to the sum of allocations when not set explicitly. Burn tracking and threshold email alerts apply at **both** levels (overall project and each role vs. its allocation).
 
+21. **Project modules / work-order breakdown** ✅ (2026-07-21) Projects ARE work orders, and work orders come sectioned — MDEQ-style **modules** with per-role hours ("Ag Chem: Dev 240h @ $135…") or NRIS-style numbered **milestones** with flat hours and fixed prices. One mechanism serves both: `project_modules` under a project, each with an hour budget (explicit flat `hours` OR Σ per-role allocations), optional per-role or module-wide rate overrides (resolution: module+role → module-wide → project rate card), and an optional agreed `amount` (set = fixed-price, bills exactly that with hours as internal budget and no rate needed to approve; null = T&M as incurred — how supplemental/out-of-scope hours work). `projects.breakdown_label` picks the display word ("modules"/"milestones" — milestones show their sort number); mechanics are identical. Timesheet shows one row per module; new entries must pick one once a project has any (pre-module entries = read-only "unassigned" bucket). Burn + threshold alerts run overall, per role, and per module. Soft delete only. This absorbs the old standalone fixed-fee `milestones` design and settles the out-of-scope-rate question (formerly open #2).
+
 19. **Approval step** ✅ (2026-07-09) **Auto-approve on save.** We're a small shop — a manual approval gate is more overhead than it's worth, so entries approve automatically when saved: billable entries approve once a rate card covers them (otherwise they stay `open` until one is added), non-billable time always approves. The `approved` status and the full approval machinery (ApprovalService, un-approve, `hours_billed` adjustment, the approvals screen) are **retained**, so a manual review step can be turned back on later without rework. Consequence: the "worked 8, bill 6" adjustment is now an explicit Ops/PM un-approve + re-approve rather than a step every entry passes through.
 
 ### Still open
 
-1. **Invoice line grouping:** by role, by task, by person, or configurable per client? *(Asked twice — still unanswered.)*
-2. **Out-of-scope rate on fixed-fee projects:** a single per-project out-of-scope hourly rate, or per-role rows on the rate card?
-3. **Milestone billing details:** who flips a milestone to `ready_to_bill` (PM or Ops)? Is partial milestone billing ever needed?
+1. **Invoice line grouping:** by role, by task, by module, by person, or configurable per client? *(Asked twice — still unanswered.)*
+2. ~~**Out-of-scope rate on fixed-fee projects**~~ — resolved by decision #21: out-of-scope/supplemental work is a T&M module billing at its own override (per-role or module-wide) or the project rate.
+3. **Milestone billing details:** who flips a fixed-price module to `ready_to_bill` (PM or Ops)? Is partial billing ever needed? (Status workflow lands with invoicing.)
 4. **PM self-approval:** on a small team the PM logs time on their own project — can they approve their own entries, or must another PM/Ops do it?
 5. **AWS deployment specifics** (account layout, Terraform vs. CDK): deferred until Phase 1 local development is underway.

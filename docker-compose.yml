@@ -1,15 +1,15 @@
 # Optional fallback database for machines without a native Postgres install.
 # Dev machines with local PostgreSQL 18 use that instead (see README).
 # Mapped to 5433 because the native Postgres service owns 5432.
-# Start with: docker compose up -d, then point ConnectionStrings:Waypoint at Port=5433.
+# Start with: docker compose up -d, then point ConnectionStrings:Crosscheck at Port=5433.
 services:
   postgres:
     image: postgres:17
-    container_name: waypoint-postgres
+    container_name: crosscheck-postgres
     environment:
-      POSTGRES_DB: waypoint
-      POSTGRES_USER: waypoint
-      POSTGRES_PASSWORD: waypoint@123
+      POSTGRES_DB: crosscheck
+      POSTGRES_USER: crosscheck
+      POSTGRES_PASSWORD: crosscheck@123
     ports:
       - "5433:5432"
     volumes:
