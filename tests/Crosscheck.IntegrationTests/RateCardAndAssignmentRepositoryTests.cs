@@ -13,6 +13,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
     private NpgsqlDataSource _dataSource = null!;
     private RateCardRepository _rateCards = null!;
     private AssignmentRepository _assignments = null!;
+    private Guid _projectId;
 
     public async Task InitializeAsync()
     {
@@ -22,6 +23,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         _dataSource = NpgsqlDataSource.Create(_postgres.GetConnectionString());
         _rateCards = new RateCardRepository(_dataSource);
         _assignments = new AssignmentRepository(_dataSource);
+        _projectId = await TestData.InsertProjectAsync(_dataSource);
     }
 
     public async Task DisposeAsync()
@@ -36,16 +38,16 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         await _rateCards.AddAsync(new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.DeveloperRoleId,
             HourlyRate = 150.00m,
         });
 
-        Assert.Equal(150.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.DeveloperRoleId));
+        Assert.Equal(150.00m, await _rateCards.ResolveAsync(_projectId, null, SeedData.DeveloperRoleId));
         // A different billing role has no rate.
-        Assert.Null(await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.ProjectManagerRoleId));
+        Assert.Null(await _rateCards.ResolveAsync(_projectId, null, SeedData.ProjectManagerRoleId));
 
-        var summary = Assert.Single(await _rateCards.GetForProjectAsync(SeedData.LeaveProjectId));
+        var summary = Assert.Single(await _rateCards.GetForProjectAsync(_projectId));
         Assert.Equal("Developer", summary.RoleName);
     }
 
@@ -55,7 +57,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         await _rateCards.AddAsync(new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.ProjectManagerRoleId,
             HourlyRate = 175.00m,
         });
@@ -64,7 +66,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         await Assert.ThrowsAsync<PostgresException>(() => _rateCards.AddAsync(new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.ProjectManagerRoleId,
             HourlyRate = 185.00m,
         }));
@@ -74,15 +76,15 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
     public async Task HasInvoicedTime_reflects_invoiced_entries_per_role()
     {
         Assert.False(await _rateCards.HasInvoicedTimeAsync(
-            SeedData.LeaveProjectId, SeedData.DeveloperRoleId));
+            _projectId, SeedData.DeveloperRoleId));
 
         await InsertInvoicedEntryAsync(new DateOnly(2026, 3, 15));
 
         Assert.True(await _rateCards.HasInvoicedTimeAsync(
-            SeedData.LeaveProjectId, SeedData.DeveloperRoleId));
+            _projectId, SeedData.DeveloperRoleId));
         // A different billing role is unaffected.
         Assert.False(await _rateCards.HasInvoicedTimeAsync(
-            SeedData.LeaveProjectId, SeedData.ProjectManagerRoleId));
+            _projectId, SeedData.ProjectManagerRoleId));
     }
 
     [Fact]
@@ -91,13 +93,13 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         await _rateCards.AddAsync(new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.DeveloperRoleId,
             HourlyRate = 150.00m,
         });
         await InsertInvoicedEntryAsync(new DateOnly(2026, 5, 1));
 
-        var summary = Assert.Single(await _rateCards.GetForProjectAsync(SeedData.LeaveProjectId));
+        var summary = Assert.Single(await _rateCards.GetForProjectAsync(_projectId));
         Assert.True(summary.HasBilledTime);
     }
 
@@ -107,7 +109,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         var rate = new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.DeveloperRoleId,
             HourlyRate = 150.00m,
         };
@@ -115,7 +117,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
 
         await _rateCards.CorrectAsync(rate.Id, 170.00m);
 
-        Assert.Equal(170.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.DeveloperRoleId));
+        Assert.Equal(170.00m, await _rateCards.ResolveAsync(_projectId, null, SeedData.DeveloperRoleId));
     }
 
     [Fact]
@@ -124,7 +126,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         var mistake = new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.DeveloperRoleId,
             HourlyRate = 99.00m,
         };
@@ -133,18 +135,18 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
 
         // Removed row is invisible to every read path.
         Assert.Null(await _rateCards.GetByIdAsync(mistake.Id));
-        Assert.Empty(await _rateCards.GetForProjectAsync(SeedData.LeaveProjectId));
-        Assert.Null(await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.DeveloperRoleId));
+        Assert.Empty(await _rateCards.GetForProjectAsync(_projectId));
+        Assert.Null(await _rateCards.ResolveAsync(_projectId, null, SeedData.DeveloperRoleId));
 
         // The partial unique index ignores soft-deleted rows, so the role can be priced again.
         await _rateCards.AddAsync(new ProjectRateCard
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             RoleId = SeedData.DeveloperRoleId,
             HourlyRate = 135.00m,
         });
-        Assert.Equal(135.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.DeveloperRoleId));
+        Assert.Equal(135.00m, await _rateCards.ResolveAsync(_projectId, null, SeedData.DeveloperRoleId));
     }
 
     [Fact]
@@ -153,13 +155,13 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         var assignment = new ProjectAssignment
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             EmployeeId = SeedData.AdminEmployeeId,
             DefaultBillingRoleId = SeedData.DeveloperRoleId,
         };
         await _assignments.AddAsync(assignment);
 
-        var fetched = await _assignments.GetByProjectAndEmployeeAsync(SeedData.LeaveProjectId, SeedData.AdminEmployeeId);
+        var fetched = await _assignments.GetByProjectAndEmployeeAsync(_projectId, SeedData.AdminEmployeeId);
         Assert.NotNull(fetched);
         Assert.Equal(assignment.Id, fetched.Id);
         Assert.True(fetched.IsActive);
@@ -169,7 +171,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         var ended = await _assignments.GetAsync(assignment.Id);
         Assert.False(ended!.IsActive);
 
-        var summaries = await _assignments.GetForProjectAsync(SeedData.LeaveProjectId);
+        var summaries = await _assignments.GetForProjectAsync(_projectId);
         var summary = Assert.Single(summaries);
         Assert.Equal("Don Woods", summary.EmployeeName);
         Assert.Equal("Developer", summary.DefaultRoleName);
@@ -178,7 +180,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
         await Assert.ThrowsAsync<PostgresException>(() => _assignments.AddAsync(new ProjectAssignment
         {
             Id = Guid.NewGuid(),
-            ProjectId = SeedData.LeaveProjectId,
+            ProjectId = _projectId,
             EmployeeId = SeedData.AdminEmployeeId,
         }));
     }
@@ -195,7 +197,7 @@ public sealed class RateCardAndAssignmentRepositoryTests : IAsyncLifetime
             new
             {
                 id = Guid.NewGuid(),
-                projectId = SeedData.LeaveProjectId,
+                projectId = _projectId,
                 employeeId = SeedData.AdminEmployeeId,
                 roleId = SeedData.DeveloperRoleId,
                 date,

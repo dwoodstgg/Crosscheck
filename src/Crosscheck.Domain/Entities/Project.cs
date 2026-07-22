@@ -11,13 +11,17 @@ public class Project
 
     public required string Name { get; set; }
 
-    /// <summary>Short code for invoices/reports, e.g. GEO-014 or INT-LEAVE. Unique per
+    /// <summary>Short code for invoices/reports, e.g. GEO-014. Unique per
     /// client (not globally) — the same code may recur across different clients.</summary>
     public required string Code { get; set; }
 
     /// <summary>Status changes are always explicit user actions — never automatic
     /// (budget exhaustion must not close a project).</summary>
     public ProjectStatus Status { get; set; } = ProjectStatus.Draft;
+
+    /// <summary>How the project is contracted — hourly, fixed rate, or service contract.
+    /// Drives what the budget form asks for.</summary>
+    public ProjectType Type { get; set; } = ProjectType.Hourly;
 
     public DateTimeOffset? ClosedAt { get; set; }
     public Guid? ClosedById { get; set; }

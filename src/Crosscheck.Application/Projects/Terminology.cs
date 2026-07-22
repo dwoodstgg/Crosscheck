@@ -18,4 +18,12 @@ public static class Terminology
 
     public static string PluralTitle(BreakdownLabel label) =>
         label == BreakdownLabel.Milestone ? "Milestones" : "Modules";
+
+    /// <summary>Display label for a project's contract type.</summary>
+    public static string ProjectTypeLabel(ProjectType type) => type switch
+    {
+        ProjectType.FixedRate => "Fixed rate",
+        ProjectType.ServiceContract => "Service contract",
+        _ => "Hourly",
+    };
 }

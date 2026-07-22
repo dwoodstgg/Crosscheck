@@ -176,7 +176,8 @@ public class TimeEntryService(
         entry.ApprovedAt = DateTimeOffset.UtcNow;
     }
 
-    /// <summary>Removes an open entry (clearing a cell). Owner-only edit rules apply.</summary>
+    /// <summary>Removes an entry (clearing a cell). Owner-only edit rules apply; invoiced
+    /// entries are protected.</summary>
     public async Task DeleteAsync(Guid entryId, CancellationToken cancellationToken = default)
     {
         var entry = await entries.GetAsync(entryId, cancellationToken)

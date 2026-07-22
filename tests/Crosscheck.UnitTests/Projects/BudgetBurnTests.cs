@@ -17,7 +17,7 @@ public class BudgetBurnTests
     private Budget NewBudget(decimal? amount = null, decimal? hours = null) => new()
     {
         Id = Guid.NewGuid(), ProjectId = _projectId,
-        Type = BudgetType.TimeAndMaterialsCap, Amount = amount ?? 56160m, Hours = hours,
+        Type = ProjectType.Hourly, Amount = amount ?? 56160m, Hours = hours,
     };
 
     private ProjectModule Module(string name, int sortOrder, params (Guid RoleId, string RoleName, decimal Hours)[] allocations)

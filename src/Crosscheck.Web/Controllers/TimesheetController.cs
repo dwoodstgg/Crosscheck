@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Crosscheck.Application.Holidays;
 using Crosscheck.Application.Preferences;
 using Crosscheck.Application.TimeEntries;
 using Crosscheck.Domain;
@@ -18,13 +19,16 @@ public class TimesheetController(
     TimesheetService timesheet,
     TimeEntryService timeEntries,
     TimesheetPeriodService periods,
+    HolidayService holidays,
     PreferenceService preferences) : Controller
 {
     public async Task<IActionResult> Index(DateOnly? anchor, string? view, CancellationToken cancellationToken)
     {
         var employeeId = User.GetEmployeeId();
         var today = DateOnly.FromDateTime(DateTime.Today);
-        var isWeek = !string.Equals(view, "month", StringComparison.OrdinalIgnoreCase);
+        // Month is the default (it mirrors the workbook). Week view is still served for
+        // ?view=week — its toggle is just hidden in the view for now.
+        var isWeek = string.Equals(view, "week", StringComparison.OrdinalIgnoreCase);
         var mode = isWeek ? "week" : "month";
         var at = anchor ?? today;
 
@@ -63,12 +67,24 @@ public class TimesheetController(
 
         bool IsLocked(DateOnly date) => closedStarts.Contains(SemiMonthlyPeriod.Containing(date).Start);
 
+        // Keyed by observed date (a weekend holiday shifts to the nearest weekday); the ±1-day
+        // widened query catches a holiday just outside the range that is observed inside it.
+        var holidaysByDate = WorkCalendar.ObservedHolidays(
+            await holidays.ListInRangeAsync(rangeStart.AddDays(-1), rangeEnd.AddDays(1), cancellationToken),
+            rangeStart, rangeEnd);
+
         var days = new List<DayColumn>();
         for (var date = rangeStart; date <= rangeEnd; date = date.AddDays(1))
         {
             var isWeekend = date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
-            days.Add(new DayColumn(date.Day, date, date.ToString("ddd", CultureInfo.InvariantCulture)[..2], isWeekend, IsLocked(date)));
+            days.Add(new DayColumn(date.Day, date, date.ToString("ddd", CultureInfo.InvariantCulture)[..2], isWeekend, IsLocked(date),
+                holidaysByDate.GetValueOrDefault(date)));
         }
+
+        var workdayCount = WorkCalendar.CountWorkdays(rangeStart, rangeEnd, holidaysByDate.Keys.ToHashSet());
+        // Observed holidays (always weekdays) still count toward the expected total — left
+        // empty they auto-credit 8h of Holiday leave, so every Mon–Fri contributes 8.
+        var holidayCount = holidaysByDate.Count;
 
         // Cells are keyed by ISO day-number within the visible range (unique per column). The
         // row identity is (project, module) — a modular project renders one row per module.
@@ -113,6 +129,10 @@ public class TimesheetController(
             Days = days,
             Rows = rows,
             BillableRoleOptions = my.BillableRoles.Select(r => new SelectListItem(r.DisplayName, r.Id.ToString())).ToList(),
+            WorkdayCount = workdayCount,
+            HolidayCount = holidayCount,
+            ExpectedHours = (workdayCount + holidayCount) * WorkCalendar.HoursPerWorkday,
+            ShowLeave = !my.IsSubcontractor,
         };
         return View(model);
     }
@@ -136,10 +156,14 @@ public class TimesheetController(
             .ToHashSet();
         bool IsLocked(DateOnly date) => closedStarts.Contains(SemiMonthlyPeriod.Containing(date).Start);
 
+        var holidaysByDate = WorkCalendar.ObservedHolidays(
+            await holidays.ListInRangeAsync(rangeStart.AddDays(-1), rangeEnd.AddDays(1), cancellationToken),
+            rangeStart, rangeEnd);
+
         var days = new List<object>();
         for (var date = rangeStart; date <= rangeEnd; date = date.AddDays(1))
         {
-            days.Add(new { date = date.ToString("yyyy-MM-dd"), locked = IsLocked(date) });
+            days.Add(new { date = date.ToString("yyyy-MM-dd"), locked = IsLocked(date), holiday = holidaysByDate.GetValueOrDefault(date) });
         }
 
         var entriesByRow = my.Entries

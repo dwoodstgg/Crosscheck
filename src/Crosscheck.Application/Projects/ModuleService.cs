@@ -206,7 +206,7 @@ public class ModuleService(
     }
 
     /// <summary>Sets or clears the agreed fixed billing amount. Set = the breakdown is
-    /// fixed-price (hours become internal budgeting); null = T&amp;M, bills hourly as incurred.</summary>
+    /// fixed-price (hours become internal budgeting); null = hourly, bills as incurred.</summary>
     public async Task SetAmountAsync(Guid projectId, Guid moduleId, decimal? amount, CancellationToken cancellationToken = default)
     {
         var (project, adminOverride) = await RequireManagedProjectAsync(projectId, cancellationToken);

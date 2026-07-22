@@ -13,6 +13,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
     private NpgsqlDataSource _dataSource = null!;
     private TimeEntryRepository _entries = null!;
     private TimesheetPeriodRepository _periods = null!;
+    private Guid _projectId;
 
     private static readonly DateOnly Day = new(2026, 7, 8);
 
@@ -24,6 +25,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         _dataSource = NpgsqlDataSource.Create(_postgres.GetConnectionString());
         _entries = new TimeEntryRepository(_dataSource);
         _periods = new TimesheetPeriodRepository(_dataSource);
+        _projectId = await TestData.InsertProjectAsync(_dataSource);
     }
 
     public async Task DisposeAsync()
@@ -32,10 +34,10 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    private static TimeEntry NewEntry(decimal worked = 8m) => new()
+    private TimeEntry NewEntry(decimal worked = 8m) => new()
     {
         Id = Guid.NewGuid(),
-        ProjectId = SeedData.LeaveProjectId,
+        ProjectId = _projectId,
         EmployeeId = SeedData.AdminEmployeeId,
         BillingRoleId = SeedData.DeveloperRoleId,
         EntryDate = Day,
@@ -52,7 +54,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         var entry = NewEntry();
         await _entries.AddAsync(entry);
 
-        var byCell = await _entries.GetByCellAsync(SeedData.AdminEmployeeId, SeedData.LeaveProjectId, null, Day);
+        var byCell = await _entries.GetByCellAsync(SeedData.AdminEmployeeId, _projectId, null, Day);
         Assert.NotNull(byCell);
         Assert.Equal(TimeEntryStatus.Open, byCell!.Status);
         Assert.Equal(8m, byCell.HoursWorked);
@@ -74,7 +76,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         var month = await _entries.GetForEmployeeRangeAsync(SeedData.AdminEmployeeId, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31));
         Assert.Single(month);
 
-        var forProject = await _entries.GetForProjectRangeAsync(SeedData.LeaveProjectId, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31));
+        var forProject = await _entries.GetForProjectRangeAsync(_projectId, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31));
         var row = Assert.Single(forProject);
         Assert.Equal("Don Woods", row.EmployeeName);
         Assert.Equal("Developer", row.BillingRoleName);
@@ -89,27 +91,31 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Delete_removes_only_open_entries()
+    public async Task Delete_removes_entries_unless_invoiced()
     {
+        // Auto-approval means a cleared cell is usually an approved entry — the delete must
+        // take those too (approval never locks owner edits). Only invoiced rows survive.
         var approved = NewEntry();
         approved.Status = TimeEntryStatus.Approved;
         await _entries.AddAsync(approved);
 
-        await _entries.DeleteAsync(approved.Id); // WHERE status = 'open' → no-op
-        Assert.NotNull(await _entries.GetAsync(approved.Id));
-
-        approved.Status = TimeEntryStatus.Open;
-        await _entries.UpdateAsync(approved);
         await _entries.DeleteAsync(approved.Id);
         Assert.Null(await _entries.GetAsync(approved.Id));
+
+        var invoiced = NewEntry(worked: 4m);
+        invoiced.Status = TimeEntryStatus.Invoiced;
+        await _entries.AddAsync(invoiced);
+
+        await _entries.DeleteAsync(invoiced.Id); // WHERE status <> 'invoiced' → no-op
+        Assert.NotNull(await _entries.GetAsync(invoiced.Id));
     }
 
     [Fact]
     public async Task Module_dimension_extends_the_cell_key_with_null_as_its_own_bucket()
     {
         var modules = new ModuleRepository(_dataSource);
-        var agChem = new ProjectModule { Id = Guid.NewGuid(), ProjectId = SeedData.LeaveProjectId, Name = "Ag Chem" };
-        var waterLevels = new ProjectModule { Id = Guid.NewGuid(), ProjectId = SeedData.LeaveProjectId, Name = "Water Levels" };
+        var agChem = new ProjectModule { Id = Guid.NewGuid(), ProjectId = _projectId, Name = "Ag Chem" };
+        var waterLevels = new ProjectModule { Id = Guid.NewGuid(), ProjectId = _projectId, Name = "Water Levels" };
         await modules.AddAsync(agChem);
         await modules.AddAsync(waterLevels);
 
@@ -131,9 +137,9 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         await Assert.ThrowsAsync<PostgresException>(() => _entries.AddAsync(NewEntry(worked: 0.5m)));
 
         // GetByCell targets one bucket at a time.
-        Assert.Equal(8m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, SeedData.LeaveProjectId, agChem.Id, Day))!.HoursWorked);
-        Assert.Equal(2m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, SeedData.LeaveProjectId, waterLevels.Id, Day))!.HoursWorked);
-        Assert.Equal(1m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, SeedData.LeaveProjectId, null, Day))!.HoursWorked);
+        Assert.Equal(8m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, _projectId, agChem.Id, Day))!.HoursWorked);
+        Assert.Equal(2m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, _projectId, waterLevels.Id, Day))!.HoursWorked);
+        Assert.Equal(1m, (await _entries.GetByCellAsync(SeedData.AdminEmployeeId, _projectId, null, Day))!.HoursWorked);
     }
 
     [Fact]
@@ -159,7 +165,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         var foreign = new ProjectModule { Id = Guid.NewGuid(), ProjectId = otherProjectId, Name = "Foreign" };
         await modules.AddAsync(foreign);
 
-        var entry = NewEntry(); // project = INT-LEAVE, module from GEO-999
+        var entry = NewEntry(); // project = TEST-001, module from GEO-999
         entry.ModuleId = foreign.Id;
         await Assert.ThrowsAsync<PostgresException>(() => _entries.AddAsync(entry));
     }
@@ -169,11 +175,11 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
     {
         var modules = new ModuleRepository(_dataSource);
         var rateCards = new RateCardRepository(_dataSource);
-        var maintenance = new ProjectModule { Id = Guid.NewGuid(), ProjectId = SeedData.LeaveProjectId, Name = "Ongoing Maintenance" };
+        var maintenance = new ProjectModule { Id = Guid.NewGuid(), ProjectId = _projectId, Name = "Ongoing Maintenance" };
         await modules.AddAsync(maintenance);
         await rateCards.AddAsync(new ProjectRateCard
         {
-            Id = Guid.NewGuid(), ProjectId = SeedData.LeaveProjectId, RoleId = SeedData.DeveloperRoleId, HourlyRate = 135.00m,
+            Id = Guid.NewGuid(), ProjectId = _projectId, RoleId = SeedData.DeveloperRoleId, HourlyRate = 135.00m,
         });
         await modules.AddRateAsync(new ProjectModuleRate
         {
@@ -187,7 +193,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         unassigned.EntryDate = Day.AddDays(1);
         await _entries.AddAsync(unassigned);
 
-        var rows = await _entries.GetBurnRowsAsync(SeedData.LeaveProjectId);
+        var rows = await _entries.GetBurnRowsAsync(_projectId);
         Assert.Equal(2, rows.Count);
 
         var moduleRow = Assert.Single(rows, r => r.ModuleId == maintenance.Id);
@@ -200,7 +206,7 @@ public sealed class TimeEntryAndPeriodRepositoryTests : IAsyncLifetime
         Assert.Equal(135.00m, unassignedRow.ResolvedRate); // project rate
 
         await modules.SoftDeleteAsync(maintenance.Id);
-        var afterDelete = await _entries.GetBurnRowsAsync(SeedData.LeaveProjectId);
+        var afterDelete = await _entries.GetBurnRowsAsync(_projectId);
         var deletedRow = Assert.Single(afterDelete, r => r.ModuleId == maintenance.Id);
         Assert.True(deletedRow.ModuleDeleted);
         Assert.Equal("Ongoing Maintenance", deletedRow.ModuleName);

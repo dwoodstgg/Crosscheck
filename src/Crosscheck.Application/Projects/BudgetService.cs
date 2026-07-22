@@ -38,11 +38,13 @@ public class BudgetService(
             : await budgets.GetRevisionsAsync(budget.Id, cancellationToken);
     }
 
-    /// <summary>Creates or replaces the project's budget. The dollar amount is required for
-    /// fixed-fee and T&amp;M-cap budgets; the hours cap is required for an hours budget; either
-    /// type may also carry the other dimension.</summary>
+    /// <summary>Creates or replaces the project's budget. What the budget means follows the
+    /// project's type: an hourly project caps dollars and/or hours; a fixed-rate project's
+    /// budget is its contract amount; a service contract may fix a monthly amount, in which
+    /// case <see cref="Budget.Amount"/> becomes the contract total (monthly × months in the
+    /// project timeframe) so burn averages out across heavy and light months.</summary>
     public async Task SetBudgetAsync(
-        Guid projectId, BudgetType type, decimal? amount, decimal? hours,
+        Guid projectId, decimal? amount, decimal? hours, decimal? monthlyAmount,
         int[]? alertThresholds, string? reason,
         IReadOnlyList<RoleHourInput>? roleAllocations = null,
         CancellationToken cancellationToken = default)
@@ -50,8 +52,9 @@ public class BudgetService(
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new DomainException("Unknown project.");
         var adminOverride = currentUser.RequireCanManage(project);
+        var type = project.Type;
 
-        if (amount is < 0)
+        if (amount is < 0 || monthlyAmount is < 0)
         {
             throw new DomainException("Budget amount cannot be negative.");
         }
@@ -59,6 +62,22 @@ public class BudgetService(
         if (hours is < 0)
         {
             throw new DomainException("Budget hours cannot be negative.");
+        }
+
+        if (monthlyAmount is not null && type != ProjectType.ServiceContract)
+        {
+            throw new DomainException("A monthly amount only applies to service contracts.");
+        }
+
+        if (type == ProjectType.ServiceContract && monthlyAmount is not null)
+        {
+            if (project.StartDate is null || project.EndDate is null)
+            {
+                throw new DomainException(
+                    "A monthly budget needs the project's start and end dates to size the contract total.");
+            }
+
+            amount = monthlyAmount.Value * ContractMonths(project.StartDate.Value, project.EndDate.Value);
         }
 
         // With modules, per-role hours live on each module and the project totals roll up from
@@ -77,14 +96,9 @@ public class BudgetService(
         // per-role hour budget yields a project total automatically.
         var effectiveHours = hours ?? (allocations.Count > 0 ? allocations.Sum(a => a.Hours) : null);
 
-        switch (type)
+        if (type == ProjectType.FixedRate && amount is null)
         {
-            case BudgetType.FixedFee when amount is null:
-                throw new DomainException("A fixed-fee budget needs a dollar amount.");
-            case BudgetType.TimeAndMaterialsCap when amount is null:
-                throw new DomainException("A time-and-materials cap needs a dollar amount.");
-            case BudgetType.HoursCap when effectiveHours is null:
-                throw new DomainException("An hours-cap budget needs an hours figure or per-role hours.");
+            throw new DomainException("A fixed-rate project's budget is its contract amount — enter the dollar figure.");
         }
 
         if (amount is null && effectiveHours is null)
@@ -120,6 +134,7 @@ public class BudgetService(
 
         budget.Type = type;
         budget.Amount = amount;
+        budget.MonthlyAmount = monthlyAmount;
         budget.Hours = effectiveHours;
         budget.AlertThresholds = thresholds;
         budget.RoleAllocations = allocations
@@ -142,6 +157,7 @@ public class BudgetService(
             {
                 Type = type.ToString(),
                 Amount = amount,
+                MonthlyAmount = monthlyAmount,
                 Hours = effectiveHours,
                 Thresholds = thresholds,
                 RoleHours = budget.RoleAllocations.ToDictionary(a => a.RoleName ?? a.RoleId.ToString(), a => a.Hours),
@@ -154,6 +170,12 @@ public class BudgetService(
         // Re-arm thresholds against the new budget and flag immediately if it's already breached.
         await budgetAlerts.OnBudgetChangedAsync(projectId, cancellationToken);
     }
+
+    /// <summary>Whole months a service contract spans, endpoints inclusive by calendar month
+    /// (Jan 1 – Dec 31 = 12; Jan 15 – Feb 1 = 2). Used to size the contract total from a
+    /// fixed monthly amount.</summary>
+    public static int ContractMonths(DateOnly start, DateOnly end) =>
+        (end.Year - start.Year) * 12 + end.Month - start.Month + 1;
 
     /// <summary>Keeps thresholds sane: whole percents in 1..100, de-duplicated and sorted.
     /// A null/empty list falls back to the standard {50, 75, 90}. Public so callers can

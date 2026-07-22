@@ -100,14 +100,14 @@
                                     {
                                         <form asp-action="RevokeRole" asp-route-id="@e.Id" method="post" class="d-inline">
                                             <input type="hidden" name="roleId" value="@role.Id" />
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">Revoke</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Revoke" aria-label="Revoke role"><i class="bi bi-x-circle"></i></button>
                                         </form>
                                     }
                                     else
                                     {
                                         <form asp-action="GrantRole" asp-route-id="@e.Id" method="post" class="d-inline">
                                             <input type="hidden" name="roleId" value="@role.Id" />
-                                            <button type="submit" class="btn btn-sm btn-outline-primary">Grant</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-primary" title="Grant" aria-label="Grant role"><i class="bi bi-plus-circle"></i></button>
                                         </form>
                                     }
                                 </td>

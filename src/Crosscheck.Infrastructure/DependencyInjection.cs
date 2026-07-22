@@ -4,6 +4,7 @@ using Npgsql;
 using Crosscheck.Application.Clients;
 using Crosscheck.Application.Common;
 using Crosscheck.Application.Employees;
+using Crosscheck.Application.Holidays;
 using Crosscheck.Application.Preferences;
 using Crosscheck.Application.Projects;
 using Crosscheck.Application.Roles;
@@ -37,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<ITimeEntryRepository, TimeEntryRepository>();
         services.AddScoped<ITimesheetPeriodRepository, TimesheetPeriodRepository>();
         services.AddScoped<IEmployeePreferenceRepository, EmployeePreferenceRepository>();
+        services.AddScoped<ICompanyHolidayRepository, CompanyHolidayRepository>();
         services.AddScoped<IAuditLog, AuditLogRepository>();
         services.AddScoped<IEmailSender, LoggingEmailSender>();
 

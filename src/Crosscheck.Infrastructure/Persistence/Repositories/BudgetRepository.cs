@@ -13,7 +13,7 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var row = await connection.QuerySingleOrDefaultAsync<BudgetRow>(new CommandDefinition(
             """
-            SELECT id, project_id, type, amount, hours, alert_thresholds, created_at, updated_at
+            SELECT id, project_id, type, amount, monthly_amount, hours, alert_thresholds, created_at, updated_at
             FROM budgets
             WHERE project_id = @projectId
             """,
@@ -55,11 +55,12 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
         // history accumulates in budget_revisions. created_at is preserved across updates.
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO budgets (id, project_id, type, amount, hours, alert_thresholds, created_at, updated_at)
-            VALUES (@Id, @ProjectId, @Type, @Amount, @Hours, @AlertThresholds, @CreatedAt, @UpdatedAt)
+            INSERT INTO budgets (id, project_id, type, amount, monthly_amount, hours, alert_thresholds, created_at, updated_at)
+            VALUES (@Id, @ProjectId, @Type, @Amount, @MonthlyAmount, @Hours, @AlertThresholds, @CreatedAt, @UpdatedAt)
             ON CONFLICT (id) DO UPDATE SET
                 type = EXCLUDED.type,
                 amount = EXCLUDED.amount,
+                monthly_amount = EXCLUDED.monthly_amount,
                 hours = EXCLUDED.hours,
                 alert_thresholds = EXCLUDED.alert_thresholds,
                 updated_at = EXCLUDED.updated_at
@@ -70,6 +71,7 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
                 budget.ProjectId,
                 Type = DbEnum.ToDb(budget.Type),
                 budget.Amount,
+                budget.MonthlyAmount,
                 budget.Hours,
                 budget.AlertThresholds,
                 budget.CreatedAt,
@@ -144,10 +146,10 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
                 BudgetId = row.BudgetId,
                 RevisedById = row.RevisedById,
                 RevisedAt = row.RevisedAt,
-                FromType = row.FromType is null ? null : DbEnum.FromDb<BudgetType>(row.FromType),
+                FromType = row.FromType is null ? null : DbEnum.FromDb<ProjectType>(row.FromType),
                 FromAmount = row.FromAmount,
                 FromHours = row.FromHours,
-                ToType = DbEnum.FromDb<BudgetType>(row.ToType!),
+                ToType = DbEnum.FromDb<ProjectType>(row.ToType!),
                 ToAmount = row.ToAmount,
                 ToHours = row.ToHours,
                 Reason = row.Reason,
@@ -159,8 +161,9 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
     {
         Id = row.Id,
         ProjectId = row.ProjectId,
-        Type = DbEnum.FromDb<BudgetType>(row.Type!),
+        Type = DbEnum.FromDb<ProjectType>(row.Type!),
         Amount = row.Amount,
+        MonthlyAmount = row.MonthlyAmount,
         Hours = row.Hours,
         AlertThresholds = row.AlertThresholds ?? [],
         CreatedAt = row.CreatedAt,
@@ -173,6 +176,7 @@ public class BudgetRepository(NpgsqlDataSource dataSource) : IBudgetRepository
         public Guid ProjectId { get; set; }
         public string? Type { get; set; }
         public decimal? Amount { get; set; }
+        public decimal? MonthlyAmount { get; set; }
         public decimal? Hours { get; set; }
         public int[]? AlertThresholds { get; set; }
         public DateTimeOffset CreatedAt { get; set; }

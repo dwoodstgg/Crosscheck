@@ -49,7 +49,8 @@ public interface ITimeEntryRepository
 
     Task UpdateAsync(TimeEntry entry, CancellationToken cancellationToken = default);
 
-    /// <summary>Removes an <c>open</c> entry (pre-financial — clearing a grid cell). Never
-    /// used on approved/invoiced entries.</summary>
+    /// <summary>Removes an entry (clearing a grid cell). Approval never locks owner edits
+    /// (design rule 5) and auto-approval means most cleared cells are <c>approved</c> —
+    /// only <c>invoiced</c> entries are protected (guarded here and in the service).</summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

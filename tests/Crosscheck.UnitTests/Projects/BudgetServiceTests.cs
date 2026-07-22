@@ -40,16 +40,18 @@ public class BudgetServiceTests
     [Fact]
     public async Task Setting_a_budget_creates_row_revision_and_audit()
     {
-        await _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, amount: 50000m, hours: null, alertThresholds: null, reason: "SOW signed");
+        _project.Type = ProjectType.FixedRate;
+
+        await _service.SetBudgetAsync(_project.Id, amount: 50000m, hours: null, monthlyAmount: null, alertThresholds: null, reason: "SOW signed");
 
         var budget = Assert.Single(_budgets.Budgets);
-        Assert.Equal(BudgetType.FixedFee, budget.Type);
+        Assert.Equal(ProjectType.FixedRate, budget.Type);   // budget mirrors the project type
         Assert.Equal(50000m, budget.Amount);
         Assert.Equal([50, 75, 90], budget.AlertThresholds);
 
         var revision = Assert.Single(_budgets.Revisions);
         Assert.Null(revision.FromType);           // first revision has no "from"
-        Assert.Equal(BudgetType.FixedFee, revision.ToType);
+        Assert.Equal(ProjectType.FixedRate, revision.ToType);
         Assert.Equal(50000m, revision.ToAmount);
         Assert.Equal("SOW signed", revision.Reason);
 
@@ -59,8 +61,8 @@ public class BudgetServiceTests
     [Fact]
     public async Task Revising_a_budget_updates_in_place_and_records_old_and_new()
     {
-        await _service.SetBudgetAsync(_project.Id, BudgetType.TimeAndMaterialsCap, 10000m, null, null, null);
-        await _service.SetBudgetAsync(_project.Id, BudgetType.TimeAndMaterialsCap, 15000m, null, null, "Change order #2");
+        await _service.SetBudgetAsync(_project.Id, 10000m, null, null, null, null);
+        await _service.SetBudgetAsync(_project.Id, 15000m, null, null, null, "Change order #2");
 
         var budget = Assert.Single(_budgets.Budgets);   // still one budget — updated in place
         Assert.Equal(15000m, budget.Amount);
@@ -77,7 +79,7 @@ public class BudgetServiceTests
     [Fact]
     public async Task Thresholds_are_deduped_sorted_and_clamped()
     {
-        await _service.SetBudgetAsync(_project.Id, BudgetType.HoursCap, null, 100m, alertThresholds: [90, 50, 50, 150, 0, 75], reason: null);
+        await _service.SetBudgetAsync(_project.Id, null, 100m, null, alertThresholds: [90, 50, 50, 150, 0, 75], reason: null);
 
         var budget = Assert.Single(_budgets.Budgets);
         Assert.Equal([50, 75, 90], budget.AlertThresholds);   // 150 and 0 dropped, 50 deduped, sorted
@@ -87,7 +89,7 @@ public class BudgetServiceTests
     public async Task Role_hours_persist_and_overall_hours_defaults_to_their_sum()
     {
         await _service.SetBudgetAsync(
-            _project.Id, BudgetType.HoursCap, amount: null, hours: null, alertThresholds: null, reason: null,
+            _project.Id, amount: null, hours: null, monthlyAmount: null, alertThresholds: null, reason: null,
             roleAllocations: [new RoleHourInput(_leadRole.Id, 300m)]);
 
         var budget = Assert.Single(_budgets.Budgets);
@@ -101,22 +103,24 @@ public class BudgetServiceTests
     public async Task Explicit_overall_hours_win_over_the_allocation_sum()
     {
         await _service.SetBudgetAsync(
-            _project.Id, BudgetType.HoursCap, amount: null, hours: 500m, alertThresholds: null, reason: null,
+            _project.Id, amount: null, hours: 500m, monthlyAmount: null, alertThresholds: null, reason: null,
             roleAllocations: [new RoleHourInput(_leadRole.Id, 300m)]);
 
         Assert.Equal(500m, Assert.Single(_budgets.Budgets).Hours);
     }
 
     [Fact]
-    public async Task Fixed_dollar_project_can_still_carry_role_hours()
+    public async Task Fixed_rate_project_can_still_carry_role_hours()
     {
+        _project.Type = ProjectType.FixedRate;
+
         await _service.SetBudgetAsync(
-            _project.Id, BudgetType.FixedFee, amount: 50000m, hours: null, alertThresholds: null, reason: null,
+            _project.Id, amount: 50000m, hours: null, monthlyAmount: null, alertThresholds: null, reason: null,
             roleAllocations: [new RoleHourInput(_leadRole.Id, 300m)]);
 
         var budget = Assert.Single(_budgets.Budgets);
         Assert.Equal(50000m, budget.Amount);
-        Assert.Equal(300m, budget.Hours);   // hours tracked alongside the fixed fee
+        Assert.Equal(300m, budget.Hours);   // hours tracked alongside the contract amount
         Assert.Single(budget.RoleAllocations);
     }
 
@@ -125,7 +129,7 @@ public class BudgetServiceTests
     {
         await Assert.ThrowsAsync<DomainException>(() =>
             _service.SetBudgetAsync(
-                _project.Id, BudgetType.FixedFee, 1000m, null, null, null,
+                _project.Id, 1000m, null, null, null, null,
                 roleAllocations: [new RoleHourInput(_adminRole.Id, 10m)]));
     }
 
@@ -133,31 +137,76 @@ public class BudgetServiceTests
     public async Task Zero_hour_allocations_are_dropped()
     {
         await _service.SetBudgetAsync(
-            _project.Id, BudgetType.FixedFee, amount: 1000m, hours: null, alertThresholds: null, reason: null,
+            _project.Id, amount: 1000m, hours: null, monthlyAmount: null, alertThresholds: null, reason: null,
             roleAllocations: [new RoleHourInput(_leadRole.Id, 0m)]);
 
         Assert.Empty(Assert.Single(_budgets.Budgets).RoleAllocations);
     }
 
     [Fact]
-    public async Task Fixed_fee_requires_an_amount()
+    public async Task Fixed_rate_requires_the_contract_amount()
     {
+        _project.Type = ProjectType.FixedRate;
+
         await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, amount: null, hours: 100m, alertThresholds: null, reason: null));
+            _service.SetBudgetAsync(_project.Id, amount: null, hours: 100m, monthlyAmount: null, alertThresholds: null, reason: null));
     }
 
     [Fact]
-    public async Task Hours_cap_requires_hours()
+    public async Task A_budget_needs_at_least_one_dimension()
     {
         await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetBudgetAsync(_project.Id, BudgetType.HoursCap, amount: 1000m, hours: null, alertThresholds: null, reason: null));
+            _service.SetBudgetAsync(_project.Id, amount: null, hours: null, monthlyAmount: null, alertThresholds: null, reason: null));
     }
 
     [Fact]
     public async Task Negative_amount_is_rejected()
     {
         await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, amount: -1m, hours: null, alertThresholds: null, reason: null));
+            _service.SetBudgetAsync(_project.Id, amount: -1m, hours: null, monthlyAmount: null, alertThresholds: null, reason: null));
+    }
+
+    [Fact]
+    public async Task Service_contract_monthly_amount_sizes_the_contract_total()
+    {
+        _project.Type = ProjectType.ServiceContract;
+        _project.StartDate = new DateOnly(2026, 1, 1);
+        _project.EndDate = new DateOnly(2026, 12, 31);   // 12 months
+
+        await _service.SetBudgetAsync(_project.Id, amount: null, hours: null, monthlyAmount: 8000m, alertThresholds: null, reason: null);
+
+        var budget = Assert.Single(_budgets.Budgets);
+        Assert.Equal(8000m, budget.MonthlyAmount);
+        Assert.Equal(96000m, budget.Amount);   // 8,000 × 12 — burn averages over the contract
+        Assert.Equal(ProjectType.ServiceContract, budget.Type);
+    }
+
+    [Fact]
+    public async Task Service_contract_monthly_budget_requires_the_timeframe()
+    {
+        _project.Type = ProjectType.ServiceContract;   // no start/end dates
+
+        var ex = await Assert.ThrowsAsync<DomainException>(() =>
+            _service.SetBudgetAsync(_project.Id, amount: null, hours: null, monthlyAmount: 8000m, alertThresholds: null, reason: null));
+        Assert.Contains("start and end dates", ex.Message);
+    }
+
+    [Fact]
+    public async Task Monthly_amount_is_rejected_outside_service_contracts()
+    {
+        await Assert.ThrowsAsync<DomainException>(() =>
+            _service.SetBudgetAsync(_project.Id, amount: null, hours: null, monthlyAmount: 8000m, alertThresholds: null, reason: null));
+    }
+
+    [Theory]
+    [InlineData(2026, 1, 1, 2026, 12, 31, 12)]
+    [InlineData(2026, 1, 15, 2026, 2, 1, 2)]     // partial months count by calendar month
+    [InlineData(2026, 7, 1, 2027, 6, 30, 12)]    // spans a year boundary
+    [InlineData(2026, 3, 1, 2026, 3, 31, 1)]
+    public void Contract_months_count_calendar_months_inclusive(
+        int y1, int m1, int d1, int y2, int m2, int d2, int expected)
+    {
+        Assert.Equal(expected, BudgetService.ContractMonths(new DateOnly(y1, m1, d1), new DateOnly(y2, m2, d2)));
     }
 
     [Fact]
@@ -169,13 +218,13 @@ public class BudgetServiceTests
         });
 
         var ex = await Assert.ThrowsAsync<DomainException>(() =>
-            _service.SetBudgetAsync(_project.Id, BudgetType.HoursCap, amount: null, hours: null,
+            _service.SetBudgetAsync(_project.Id, amount: null, hours: null, monthlyAmount: null,
                 alertThresholds: null, reason: null,
                 roleAllocations: [new RoleHourInput(_leadRole.Id, 100m)]));
         Assert.Contains("per module", ex.Message);
 
         // The dollar budget itself still works alongside modules.
-        await _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, amount: 56160m, hours: null,
+        await _service.SetBudgetAsync(_project.Id, amount: 56160m, hours: null, monthlyAmount: null,
             alertThresholds: null, reason: null);
         Assert.Single(_budgets.Budgets);
     }
@@ -186,7 +235,7 @@ public class BudgetServiceTests
         _project.ProjectManagerId = Guid.NewGuid();   // not the current user
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, 1000m, null, null, null));
+            _service.SetBudgetAsync(_project.Id, 1000m, null, null, null, null));
     }
 
     [Fact]
@@ -196,7 +245,7 @@ public class BudgetServiceTests
         _currentUser.Roles.Add(RoleNames.Admin);
         _project.ProjectManagerId = Guid.NewGuid();   // Admin manages anyway, but it's an override
 
-        await _service.SetBudgetAsync(_project.Id, BudgetType.FixedFee, 1000m, null, null, null);
+        await _service.SetBudgetAsync(_project.Id, 1000m, null, null, null, null);
 
         var evt = Assert.Single(_audit.Events);
         Assert.Contains("\"adminOverride\":true", System.Text.Json.JsonSerializer.Serialize(evt.Details));

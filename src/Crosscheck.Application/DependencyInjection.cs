@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Crosscheck.Application.Clients;
 using Crosscheck.Application.Employees;
+using Crosscheck.Application.Holidays;
 using Crosscheck.Application.Preferences;
 using Crosscheck.Application.Projects;
 using Crosscheck.Application.Roles;
@@ -23,10 +24,12 @@ public static class DependencyInjection
         services.AddScoped<ModuleService>();
         services.AddScoped<IBudgetAlertService, BudgetAlertService>();
         services.AddScoped<ProjectDashboardService>();
+        services.AddScoped<PortfolioDashboardService>();
         services.AddScoped<TimesheetService>();
         services.AddScoped<TimeEntryService>();
         services.AddScoped<ApprovalService>();
         services.AddScoped<TimesheetPeriodService>();
+        services.AddScoped<HolidayService>();
         services.AddScoped<PreferenceService>();
         return services;
     }

@@ -11,8 +11,6 @@
     var label = project.BreakdownLabel;
     var one = Terminology.Singular(label);        // "module" | "milestone"
     var many = Terminology.Plural(label);
-    var oneTitle = Terminology.SingularTitle(label);
-    var manyTitle = Terminology.PluralTitle(label);
     var isMilestone = label == BreakdownLabel.Milestone;
 
     string DisplayName(Crosscheck.Domain.Entities.ProjectModule m) =>
@@ -24,11 +22,25 @@
 
 <div class="card panel-card mt-4 mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>@manyTitle</span>
-        @if (Model.Modules.Count > 0)
-        {
-            <span class="badge text-bg-secondary">@Hrs(totalHours) hrs total</span>
-        }
+        <span>Work breakdown</span>
+        <div class="d-flex align-items-center gap-2">
+            @if (Model.Modules.Count > 0)
+            {
+                <span class="badge text-bg-secondary">@Hrs(totalHours) hrs total</span>
+            }
+            @* Display-only wording switch — applies immediately, no page-level Save needed.
+               Submitted via fetch (script below) so the rest of the page keeps its unsaved
+               Details/Budget input and scroll position. *@
+            <form asp-action="SetBreakdownLabel" asp-route-id="@project.Id" method="post"
+                  class="d-flex align-items-center gap-1">
+                <label class="text-muted small text-nowrap mb-0" for="breakdown-label-select">Rows are</label>
+                <select id="breakdown-label-select" name="breakdownLabel" class="form-select form-select-sm w-auto"
+                        title="What this project calls its budget sections — display only, both work the same">
+                    <option value="@BreakdownLabel.Module" selected="@(label == BreakdownLabel.Module)">Modules</option>
+                    <option value="@BreakdownLabel.Milestone" selected="@(label == BreakdownLabel.Milestone)">Milestones</option>
+                </select>
+            </form>
+        </div>
     </div>
     <div class="card-body">
         <p class="text-muted small mb-2">
@@ -61,7 +73,7 @@
                         }
                         else
                         {
-                            <span class="badge text-bg-light border ms-1" title="Bills hours × rate as incurred">T&amp;M</span>
+                            <span class="badge text-bg-light border ms-1" title="Bills hours × rate as incurred">Hourly</span>
                         }
                         <div class="text-muted small">
                             @Hrs(m.EffectiveHours) hrs
@@ -81,13 +93,14 @@
                     </div>
                     <div class="text-nowrap">
                         <button type="button" class="btn btn-sm btn-outline-secondary"
-                                data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false">Edit</button>
+                                data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false"
+                                title="Edit" aria-label="Edit @one"><i class="bi bi-pencil"></i></button>
                         <form asp-action="DeleteModule" asp-route-id="@project.Id" method="post" class="d-inline"
                               onsubmit="return confirm('@(summary.HasLoggedTime
                                   ? $"Remove this {one}? Time has been logged against it — those entries keep their hours and pricing, and it shows as removed in reports. New time can no longer pick it."
                                   : $"Remove this {one}? No time has been logged against it.")');">
                             <input type="hidden" name="moduleId" value="@m.Id" />
-                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove" aria-label="Remove @one"><i class="bi bi-trash"></i></button>
                         </form>
                     </div>
                 </div>
@@ -118,7 +131,7 @@
                                     <div class="input-group input-group-sm">
                                         <span class="input-group-text">$</span>
                                         <input name="moduleAmount" type="number" step="0.01" min="0" class="form-control"
-                                               value="@(m.Amount?.ToString("0.##"))" placeholder="T&M" />
+                                               value="@(m.Amount?.ToString("0.##"))" placeholder="bills hourly" />
                                         @if (summary.PlannedValue is { } prefill)
                                         {
                                             <button type="button" class="btn btn-outline-secondary"
@@ -170,16 +183,17 @@
                                         <td class="text-end text-nowrap">
                                             @if (rate.HasBilledTime)
                                             {
-                                                <span class="text-muted small" title="Invoiced time is billed at this rate — void the invoice to change it">🔒 billed</span>
+                                                <span class="text-muted small" title="Invoiced time is billed at this rate — void the invoice to change it"><i class="bi bi-lock"></i> billed</span>
                                             }
                                             else
                                             {
                                                 <button type="button" class="btn btn-sm btn-outline-secondary"
-                                                        data-bs-toggle="collapse" data-bs-target="#@rateEditId" aria-expanded="false">Edit</button>
+                                                        data-bs-toggle="collapse" data-bs-target="#@rateEditId" aria-expanded="false"
+                                                        title="Edit" aria-label="Edit rate override"><i class="bi bi-pencil"></i></button>
                                                 <form asp-action="DeleteModuleRate" asp-route-id="@project.Id" method="post" class="d-inline"
                                                       onsubmit="return confirm('Remove this rate override? Logged time falls back to the next rate in line (all-roles override or the project rate).');">
                                                     <input type="hidden" name="moduleRateId" value="@r.Id" />
-                                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete" aria-label="Delete rate override"><i class="bi bi-trash"></i></button>
                                                 </form>
                                             }
                                         </td>
@@ -245,7 +259,7 @@
                     <label class="form-label small mb-1">Agreed amount <span class="text-muted">(optional)</span></label>
                     <div class="input-group input-group-sm">
                         <span class="input-group-text">$</span>
-                        <input name="moduleAmount" type="number" step="0.01" min="0" class="form-control" placeholder="T&M" />
+                        <input name="moduleAmount" type="number" step="0.01" min="0" class="form-control" placeholder="bills hourly" />
                     </div>
                 </div>
                 @foreach (var option in Model.BillableRoleOptions)
@@ -263,3 +277,33 @@
         </div>
     </div>
 </div>
+
+<script>
+    // The wording switch posts via fetch and swaps in the re-rendered card, so flipping
+    // Modules/Milestones doesn't reload the page (a reload drops unsaved Details/Budget
+    // input and the scroll position). Wired once on document — scripts inside swapped-in
+    // HTML never re-execute, so a listener on the card itself would die after one swap.
+    if (!window.breakdownLabelWired) {
+        window.breakdownLabelWired = true;
+        document.addEventListener('change', async e => {
+            if (e.target.id !== 'breakdown-label-select') return;
+            const form = e.target.closest('form');
+            const card = e.target.closest('.panel-card');
+            try {
+                const resp = await fetch(form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (resp.redirected) { window.location = resp.url; return; }
+                if (!resp.ok) throw new Error(resp.status);
+                const doc = new DOMParser().parseFromString(await resp.text(), 'text/html');
+                const fresh = doc.querySelector('.panel-card');
+                if (!fresh) throw new Error('unexpected response');
+                card.replaceWith(fresh);
+            } catch {
+                form.submit();
+            }
+        });
+    }
+</script>

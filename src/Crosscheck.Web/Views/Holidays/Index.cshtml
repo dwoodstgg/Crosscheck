@@ -1,0 +1,135 @@
+@using Crosscheck.Application.Holidays
+@using Crosscheck.Domain.Entities
+@model IReadOnlyList<CompanyHoliday>
+@{
+    ViewData["Title"] = "Holidays";
+    var year = (int)ViewBag.Year;
+    var today = DateOnly.FromDateTime(DateTime.Today);
+}
+
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-1 gap-2">
+    <h1 class="mb-0">Holidays</h1>
+    <div class="btn-group" role="group" aria-label="Year">
+        <a class="btn btn-sm btn-outline-secondary" asp-action="Index" asp-route-year="@(year - 1)">&laquo; @(year - 1)</a>
+        <span class="btn btn-sm btn-primary pe-none">@year</span>
+        <a class="btn btn-sm btn-outline-secondary" asp-action="Index" asp-route-year="@(year + 1)">@(year + 1) &raquo;</a>
+    </div>
+</div>
+<p class="text-muted">
+    Company holidays show greyed out on every timesheet and don't count as workdays in the
+    month's expected hours. A holiday falling on a weekend is observed on the nearest weekday
+    (Sat &rarr; Fri, Sun &rarr; Mon) — the observed day is what greys out and auto-credits.
+    Employees can still log time on a holiday — anyone taking the day off records it as leave
+    instead.
+</p>
+
+@if (TempData["Ok"] is string ok)
+{
+    <div class="alert alert-success">@ok</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger">@err</div>
+}
+
+<div class="card shadow-sm mb-3" style="max-width: 640px">
+    <div class="card-body">
+        <form method="post" asp-action="Add" class="row g-2 align-items-end">
+            @Html.AntiForgeryToken()
+            <div class="col-auto">
+                <label for="hol-date" class="form-label small mb-1">Date</label>
+                <input type="date" id="hol-date" name="date" class="form-control form-control-sm" required
+                       value="@(new DateOnly(year, today.Year == year ? today.Month : 1, 1).ToString("yyyy-MM-dd"))" />
+            </div>
+            <div class="col">
+                <label for="hol-name" class="form-label small mb-1">Name</label>
+                <input type="text" id="hol-name" name="name" class="form-control form-control-sm"
+                       placeholder="e.g. Independence Day" maxlength="200" required />
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary">Add holiday</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm" style="max-width: 640px">
+    <div class="card-body p-0">
+        @if (Model.Count == 0)
+        {
+            <div class="p-3">
+                <div class="text-muted mb-2">No holidays defined for @year yet.</div>
+                <form method="post" asp-action="CopyFromPreviousYear" class="d-inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="year" value="@year" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-copy"></i> Copy from @(year - 1)
+                    </button>
+                </form>
+            </div>
+        }
+        else
+        {
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3" style="width: 30%">Date</th>
+                        <th style="width: 30%">Observed</th>
+                        <th>Holiday</th>
+                        <th class="pe-3 text-end" style="width: 1%"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var holiday in Model)
+                    {
+                        var isWeekend = holiday.Date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+                        var observed = WorkCalendar.ObservedDate(holiday.Date);
+                        <tr class="@(holiday.Date < today ? "text-muted" : "")">
+                            <td class="ps-3">
+                                @holiday.Date.ToString("ddd, MMM d")
+                                @if (isWeekend)
+                                {
+                                    <span class="badge text-bg-light text-muted ms-1" title="Falls on a weekend — observed on the nearest weekday (Sat &rarr; Fri, Sun &rarr; Mon).">weekend</span>
+                                }
+                            </td>
+                            <td>
+                                @if (observed == holiday.Date)
+                                {
+                                    <span class="text-muted">@observed.ToString("ddd, MMM d")</span>
+                                }
+                                else
+                                {
+                                    <strong>@observed.ToString("ddd, MMM d")</strong>
+                                    <span class="badge text-bg-info-subtle text-info-emphasis ms-1"
+                                          title="This is the day taken off — it greys out on timesheets and auto-credits 8h of Holiday leave.">observed</span>
+                                }
+                            </td>
+                            <td>@holiday.Name</td>
+                            <td class="pe-3 text-end">
+                                <form method="post" asp-action="Remove" class="d-inline"
+                                      onsubmit="return confirm('Remove @Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(holiday.Name)) (@holiday.Date.ToString("MMM d"))?');">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="id" value="@holiday.Id" />
+                                    <input type="hidden" name="year" value="@year" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Remove @holiday.Name">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <div class="border-top px-3 py-2">
+                <form method="post" asp-action="CopyFromPreviousYear" class="d-inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="year" value="@year" />
+                    <button type="submit" class="btn btn-sm btn-link text-decoration-none p-0"
+                            title="Add @(year - 1)'s holidays to @year — floating holidays (MLK, Memorial Day, Thanksgiving, …) land on the right weekday; dates already on the calendar are skipped.">
+                        <i class="bi bi-copy"></i> Copy from @(year - 1)
+                    </button>
+                </form>
+            </div>
+        }
+    </div>
+</div>

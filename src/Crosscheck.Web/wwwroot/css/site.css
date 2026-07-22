@@ -220,9 +220,20 @@ body {
 .ts-grid tbody tr:hover td { background: #fcfcfd; }
 .ts-grid tbody tr:hover .ts-proj { background: #fcfcfd; }
 
-.ts-weekend { background: #fafbfc; }
+/* Weekends: the pronounced solid grey column of the Excel workbook. */
+.ts-weekend { background: #c0c0c0; }
+.ts-grid thead th.ts-weekend { background: #b4b4b4; color: #55595e; }
+.ts-grid thead th.ts-weekend .ts-dow { color: #6c7075; }
+.ts-grid tbody tr:hover td.ts-weekend { background: #b8b8b8; }
+.ts-grid tfoot td.ts-weekend { background: #c0c0c0; }
 
-/* Today's column — subtle blue accent that wins over weekend shading. */
+/* Company holidays: a lighter informational grey (still editable — worked holidays are
+   logged normally; an empty one self-fills as Leave – Holiday). */
+.ts-holiday { background: #eef0f2; }
+.ts-grid thead th.ts-holiday { background: #e9ebee; color: #868e96; }
+.ts-grid thead th.ts-holiday .ts-dow { color: #868e96; }
+
+/* Today's column — subtle blue accent that wins over weekend/holiday shading. */
 .ts-grid thead th.ts-today { background: #e7f1ff; color: #0d6efd; }
 .ts-grid td.ts-today { background: #f3f8ff; }
 
@@ -234,6 +245,33 @@ body {
   color: #1f2933;
   padding: .45rem .2rem;
   border-top: 2px solid #e9ecef;
+}
+
+/* The workbook-style footer: weekly reads as secondary detail; "Daily total" is the
+   emphatic all-in line. */
+.ts-grid tfoot .ts-foot-weekly td { font-weight: 400; color: #6c757d; border-top-width: 1px; }
+.ts-grid tfoot .ts-foot-daily td { border-top-width: 1px; }
+.ts-grid tfoot .ts-week-total { border-right: 1px solid #e3e6e9; }
+
+/* Leave / Extended Work Week rows carry the sheet's pale cyan, running across weekends
+   like the workbook. Placed after the weekend rules on purpose — cyan wins in these rows. */
+.ts-grid tfoot .ts-foot-leave td { background: #d6f0f2; font-weight: 400; color: #1f2933; border-top-width: 1px; }
+.ts-grid tfoot .ts-foot-leave .ts-proj { background: #d6f0f2; }
+
+/* Spanned right-justified labels (Leave – Personal, Extended Work Week). */
+.ts-grid tfoot td.ts-span-label { text-align: right; padding-right: .6rem; font-weight: 600; }
+
+/* Auto-credited holiday leave (an empty weekday holiday counts as 8h) reads as
+   implied rather than entered — shown in the Daily total row. */
+.ts-grid tfoot td.ts-auto { font-style: italic; color: #6c757d; }
+
+/* "of 176" expected-hours label under the grand total. */
+.ts-expected {
+  display: block;
+  font-size: .68rem;
+  font-weight: 400;
+  color: #868e96;
+  line-height: 1.1;
 }
 
 .ts-hours {
@@ -304,9 +342,13 @@ body {
 .ts-day-card .card-header { background: #f8f9fa; padding: .6rem 1rem; }
 .ts-day-table td, .ts-day-table th { padding: .5rem 1rem; }
 /* Weekends: a slight gray break from workdays (time can still be entered). */
-.ts-day-card.ts-day-weekend { background: #f4f5f7; }
-.ts-day-card.ts-day-weekend .card-header { background: #e9ebef; color: #6c757d; }
+.ts-day-card.ts-day-weekend { background: #d9dbde; }
+.ts-day-card.ts-day-weekend .card-header { background: #c0c0c0; color: #55595e; }
 .ts-day-card.ts-day-weekend .ts-day-table { --bs-table-bg: transparent; }
+/* Holidays: same informational grey treatment, a shade deeper than weekends. */
+.ts-day-card.ts-day-holiday { background: #eef0f2; }
+.ts-day-card.ts-day-holiday .card-header { background: #e2e5e9; color: #6c757d; }
+.ts-day-card.ts-day-holiday .ts-day-table { --bs-table-bg: transparent; }
 .ts-day-card.ts-day-today { border-color: #9ec5fe; }
 .ts-day-card.ts-day-today .card-header { background: #e7f1ff; color: #0d6efd; }
 .ts-day-table { font-size: .85rem; }

@@ -52,8 +52,8 @@
                 </td>
                 <td><span class="badge @StatusBadge(p.Status)">@StatusLabel(p.Status)</span></td>
                 <td class="text-end text-nowrap">
-                    <a class="btn btn-sm btn-outline-secondary" asp-action="Dashboard" asp-route-id="@p.Id">Dashboard</a>
-                    <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@p.Id">Manage</a>
+                    <a class="btn btn-sm btn-outline-secondary" asp-action="Dashboard" asp-route-id="@p.Id" title="Dashboard" aria-label="Dashboard"><i class="bi bi-speedometer2"></i></a>
+                    <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@p.Id" title="Manage" aria-label="Manage"><i class="bi bi-gear"></i></a>
                 </td>
             </tr>
         }

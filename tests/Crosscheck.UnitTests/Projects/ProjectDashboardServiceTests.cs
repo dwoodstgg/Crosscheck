@@ -127,7 +127,7 @@ public class ProjectDashboardServiceTests
         {
             Id = Guid.NewGuid(),
             ProjectId = _project.Id,
-            Type = BudgetType.TimeAndMaterialsCap,
+            Type = ProjectType.Hourly,
             Amount = 1000m,
             AlertThresholds = [50, 75, 90],
         });
@@ -152,7 +152,7 @@ public class ProjectDashboardServiceTests
         {
             Id = Guid.NewGuid(),
             ProjectId = _project.Id,
-            Type = BudgetType.FixedFee,
+            Type = ProjectType.FixedRate,
             Amount = 500m,
             AlertThresholds = [90],
         });
@@ -173,7 +173,7 @@ public class ProjectDashboardServiceTests
         {
             Id = Guid.NewGuid(),
             ProjectId = _project.Id,
-            Type = BudgetType.HoursCap,
+            Type = ProjectType.Hourly,
             Hours = 40m,
         });
         Add(_alice, _devRole, TimeEntryStatus.Approved, worked: 10m, billed: 8m);  // spent hours = 8 (billed)

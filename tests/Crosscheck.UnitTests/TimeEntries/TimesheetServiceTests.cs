@@ -17,10 +17,14 @@ public class TimesheetServiceTests
     private static readonly DateOnly From = new(2026, 7, 1);
     private static readonly DateOnly To = new(2026, 7, 31);
 
+    private readonly FakeEmployeeRepository _employees;
+
     public TimesheetServiceTests()
     {
+        _employees = new FakeEmployeeRepository(_roles);
         _service = new TimesheetService(
-            _currentUser, _assignments, _entries, new FakeModuleRepository(_roles), _projects, _roles);
+            _currentUser, _assignments, _entries, new FakeModuleRepository(_roles), _projects, _roles,
+            _employees);
     }
 
     private Guid AssignMe()
@@ -33,6 +37,37 @@ public class TimesheetServiceTests
             EmployeeId = _currentUser.EmployeeId!.Value,
         });
         return projectId;
+    }
+
+    [Fact]
+    public async Task A_1099_subcontractor_is_flagged_so_the_grid_hides_leave()
+    {
+        _employees.Employees.Add(new Employee
+        {
+            Id = _currentUser.EmployeeId!.Value,
+            Email = "sub@thegeospatialgroup.com",
+            DisplayName = "Sub Contractor",
+            EmploymentType = EmploymentType.Subcontractor,
+        });
+
+        var sheet = await _service.GetMyRangeAsync(From, To);
+
+        Assert.True(sheet.IsSubcontractor);
+    }
+
+    [Fact]
+    public async Task A_w2_employee_is_not_flagged_as_subcontractor()
+    {
+        _employees.Employees.Add(new Employee
+        {
+            Id = _currentUser.EmployeeId!.Value,
+            Email = "staff@thegeospatialgroup.com",
+            DisplayName = "Staff Member",
+        });
+
+        var sheet = await _service.GetMyRangeAsync(From, To);
+
+        Assert.False(sheet.IsSubcontractor);
     }
 
     [Fact]

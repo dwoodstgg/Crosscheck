@@ -146,8 +146,11 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        // Auto-approval means a cleared cell is usually an 'approved' entry — approval never
+        // locks owner edits (design rule 5). Only invoiced entries are protected; the DB
+        // guard backs up the service-layer check.
         await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM time_entries WHERE id = @id AND status = 'open'",
+            "DELETE FROM time_entries WHERE id = @id AND status <> 'invoiced'",
             new { id },
             cancellationToken: cancellationToken));
     }

@@ -1,3 +1,4 @@
+@using Crosscheck.Domain.Enums
 @model ProjectFormViewModel
 
 <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
@@ -32,17 +33,11 @@
     <span asp-validation-for="ProjectManagerId" class="text-danger"></span>
 </div>
 
-<div class="row">
-    <div class="col-md-6 mb-3">
-        <label asp-for="StartDate" class="form-label"></label>
-        <input asp-for="StartDate" class="form-control" />
-    </div>
-    <div class="col-md-6 mb-3">
-        <label asp-for="EndDate" class="form-label"></label>
-        <input asp-for="EndDate" class="form-control" />
-        <span asp-validation-for="EndDate" class="text-danger"></span>
-    </div>
-</div>
+@* The Edit page hosts project type + dates in the Budget card of the same form instead. *@
+@if (ViewData["TypeAndDatesInBudgetCard"] is not true)
+{
+    <partial name="_TypeAndDates" model="Model" />
+}
 
 <fieldset class="form-section">
     <legend>Billing (overrides the client)</legend>

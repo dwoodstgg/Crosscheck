@@ -62,15 +62,14 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             new { email = SeedData.AdminEmail.ToUpperInvariant() });
         Assert.Equal(1, byUpperEmail);
 
-        // Internal client owns the active INT-LEAVE project.
-        var leaveProjectCount = await connection.ExecuteScalarAsync<int>(
-            """
-            SELECT count(*) FROM projects p
-            JOIN clients c ON c.id = p.client_id
-            WHERE p.code = @code AND p.status = 'active' AND c.is_internal
-            """,
-            new { code = SeedData.LeaveProjectCode });
-        Assert.Equal(1, leaveProjectCount);
+        // The internal client is seeded; no projects ship with the seed (the old INT-LEAVE
+        // project was retired by 0018 — leave is derived on the timesheet, never logged).
+        var internalClientCount = await connection.ExecuteScalarAsync<int>(
+            "SELECT count(*) FROM clients WHERE is_internal");
+        Assert.Equal(1, internalClientCount);
+
+        var projectCount = await connection.ExecuteScalarAsync<int>("SELECT count(*) FROM projects");
+        Assert.Equal(0, projectCount);
     }
 
     [Fact]

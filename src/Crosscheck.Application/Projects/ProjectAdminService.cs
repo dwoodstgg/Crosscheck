@@ -59,7 +59,7 @@ public class ProjectAdminService(
     }
 
     public async Task<Project> CreateAsync(
-        Guid clientId, string name, string code, Guid projectManagerId,
+        Guid clientId, string name, string code, Guid projectManagerId, ProjectType type,
         DateOnly? startDate, DateOnly? endDate, ProjectBillingInput? billing = null,
         BreakdownLabel breakdownLabel = BreakdownLabel.Module,
         CancellationToken cancellationToken = default)
@@ -81,6 +81,7 @@ public class ProjectAdminService(
             Name = name.Trim(),
             Code = code,
             ProjectManagerId = projectManagerId,
+            Type = type,
             StartDate = startDate,
             EndDate = endDate,
             BreakdownLabel = breakdownLabel,
@@ -96,9 +97,8 @@ public class ProjectAdminService(
     }
 
     public async Task UpdateAsync(
-        Guid projectId, Guid clientId, string name, string code, Guid projectManagerId,
+        Guid projectId, Guid clientId, string name, string code, Guid projectManagerId, ProjectType type,
         DateOnly? startDate, DateOnly? endDate, ProjectBillingInput? billing = null,
-        BreakdownLabel breakdownLabel = BreakdownLabel.Module,
         CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -119,15 +119,35 @@ public class ProjectAdminService(
         project.Name = name.Trim();
         project.Code = code;
         project.ProjectManagerId = projectManagerId;
+        project.Type = type;
         project.StartDate = startDate;
         project.EndDate = endDate;
-        project.BreakdownLabel = breakdownLabel;
         ApplyBilling(project, billing);
         await projects.UpdateAsync(project, cancellationToken);
 
         await audit.WriteAsync(new AuditEvent(
             currentUser.EmployeeId, "project.updated", "project", project.Id,
-            new { project.Code, project.Name, adminOverride }), cancellationToken);
+            new { project.Code, project.Name, Type = project.Type.ToString(), adminOverride }), cancellationToken);
+    }
+
+    /// <summary>Renames what the project calls its budget breakdown ("modules" vs
+    /// "milestones"). Display only — applied on its own so the wording flips immediately,
+    /// independent of the Details/Budget save.</summary>
+    public async Task SetBreakdownLabelAsync(
+        Guid projectId, BreakdownLabel breakdownLabel, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new DomainException("Unknown project.");
+
+        RequireCanManage(project);
+
+        if (project.BreakdownLabel == breakdownLabel)
+        {
+            return;
+        }
+
+        project.BreakdownLabel = breakdownLabel;
+        await projects.UpdateAsync(project, cancellationToken);
     }
 
     public async Task SetStatusAsync(Guid projectId, ProjectStatus target, CancellationToken cancellationToken = default)

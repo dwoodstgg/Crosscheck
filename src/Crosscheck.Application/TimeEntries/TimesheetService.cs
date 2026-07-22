@@ -1,4 +1,5 @@
 using Crosscheck.Application.Common;
+using Crosscheck.Application.Employees;
 using Crosscheck.Application.Projects;
 using Crosscheck.Application.Roles;
 using Crosscheck.Domain.Entities;
@@ -29,6 +30,11 @@ public class MyMonthTimesheet
     public required IReadOnlyList<TimesheetRow> Rows { get; init; }
     public required IReadOnlyList<TimeEntry> Entries { get; init; }
     public required IReadOnlyList<BillableRoleOption> BillableRoles { get; init; }
+
+    /// <summary>True for 1099 subcontractors. They are paid for hours worked only, so the
+    /// grid hides the leave section (holiday credit, personal countdown, extended week)
+    /// and the expected-hours yardstick.</summary>
+    public bool IsSubcontractor { get; init; }
 }
 
 /// <summary>Read-side assembly of an employee's own timesheet grid. It reads only the
@@ -39,11 +45,13 @@ public class TimesheetService(
     ITimeEntryRepository entries,
     IModuleRepository modules,
     IProjectRepository projects,
-    IRoleRepository roles)
+    IRoleRepository roles,
+    IEmployeeRepository employees)
 {
     public async Task<MyMonthTimesheet> GetMyRangeAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
     {
         var me = currentUser.EmployeeId ?? throw new UnauthorizedAccessException("No signed-in employee.");
+        var employee = await employees.GetByIdAsync(me, cancellationToken);
 
         var monthEntries = await entries.GetForEmployeeRangeAsync(me, from, to, cancellationToken);
         var projectsWithEntries = monthEntries.Select(e => e.ProjectId).ToHashSet();
@@ -107,7 +115,13 @@ public class TimesheetService(
             .OrderBy(r => r.DisplayName)
             .ToList();
 
-        return new MyMonthTimesheet { Rows = rows, Entries = monthEntries, BillableRoles = billableRoles };
+        return new MyMonthTimesheet
+        {
+            Rows = rows,
+            Entries = monthEntries,
+            BillableRoles = billableRoles,
+            IsSubcontractor = employee?.EmploymentType == EmploymentType.Subcontractor,
+        };
     }
 
     private static TimesheetRow Row(EmployeeAssignment a, Guid? moduleId, string? moduleLabel, bool readOnly) =>

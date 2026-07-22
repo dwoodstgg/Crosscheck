@@ -130,7 +130,7 @@
                                     <input type="hidden" name="to" value="@Model.To.ToString("yyyy-MM-dd")" />
                                     <input type="number" name="billedHours" value="@Fmt(e.HoursBilled)" min="0" max="@Fmt(e.HoursWorked)"
                                            step="0.25" class="form-control form-control-sm" style="width:5rem" title="Billed hours" />
-                                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                    <button type="submit" class="btn btn-sm btn-success" title="Approve" aria-label="Approve entry"><i class="bi bi-check-lg"></i></button>
                                 </form>
                             }
                             else if (e.Status == TimeEntryStatus.Approved)
@@ -141,7 +141,8 @@
                                     <input type="hidden" name="from" value="@Model.From.ToString("yyyy-MM-dd")" />
                                     <input type="hidden" name="to" value="@Model.To.ToString("yyyy-MM-dd")" />
                                     <button type="submit" class="btn btn-sm btn-outline-secondary"
-                                            title="Return this entry to open for correction">Un-approve</button>
+                                            title="Un-approve — return this entry to open for correction"
+                                            aria-label="Un-approve entry"><i class="bi bi-arrow-counterclockwise"></i></button>
                                 </form>
                             }
                             else

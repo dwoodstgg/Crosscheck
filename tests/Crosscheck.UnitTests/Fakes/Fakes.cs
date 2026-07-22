@@ -1,6 +1,7 @@
 using Crosscheck.Application.Clients;
 using Crosscheck.Application.Common;
 using Crosscheck.Application.Employees;
+using Crosscheck.Application.Holidays;
 using Crosscheck.Application.Preferences;
 using Crosscheck.Application.Projects;
 using Crosscheck.Application.Roles;
@@ -654,6 +655,37 @@ public sealed class FakeTimesheetPeriodRepository : ITimesheetPeriodRepository
             Periods.Add(period);
         }
 
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class FakeCompanyHolidayRepository : ICompanyHolidayRepository
+{
+    public List<CompanyHoliday> Holidays { get; } = [];
+    public List<(Guid Id, Guid? DeletedBy)> Deleted { get; } = [];
+
+    public Task<IReadOnlyList<CompanyHoliday>> GetInRangeAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<CompanyHoliday>>(Holidays
+            .Where(h => h.Date >= from && h.Date <= to)
+            .OrderBy(h => h.Date)
+            .ToList());
+
+    public Task<CompanyHoliday?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Holidays.FirstOrDefault(h => h.Id == id));
+
+    public Task<CompanyHoliday?> GetByDateAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Holidays.FirstOrDefault(h => h.Date == date));
+
+    public Task AddAsync(CompanyHoliday holiday, CancellationToken cancellationToken = default)
+    {
+        Holidays.Add(holiday);
+        return Task.CompletedTask;
+    }
+
+    public Task SoftDeleteAsync(Guid id, Guid? deletedBy, CancellationToken cancellationToken = default)
+    {
+        Holidays.RemoveAll(h => h.Id == id);
+        Deleted.Add((id, deletedBy));
         return Task.CompletedTask;
     }
 }

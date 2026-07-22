@@ -1,0 +1,192 @@
+@using System.Globalization
+@using Crosscheck.Application.Projects
+@using Crosscheck.Domain.Enums
+@model PortfolioDashboard
+@{
+    ViewData["Title"] = "Dashboard";
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C0", usd);
+    string Hrs(decimal h) => h.ToString("0.##");
+
+    static string StatusBadge(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Active => "text-bg-success",
+        ProjectStatus.OnHold => "text-bg-warning",
+        ProjectStatus.Draft => "text-bg-secondary",
+        ProjectStatus.Closed => "text-bg-dark",
+        _ => "text-bg-light",
+    };
+
+    string BurnBarClass(bool over, double pct) => over ? "bg-danger" : pct >= 90 ? "bg-warning" : "bg-success";
+
+    var switcher = new ProjectSwitcherViewModel(
+        Model.Projects.Select(p => new ProjectSwitcherItem(p.Project.Id, $"{p.ClientName} - {p.Project.Name}")).ToList(),
+        CurrentProjectId: null,
+        ButtonLabel: "Project dashboards",
+        ButtonClass: "btn btn-primary btn-sm");
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <h1 class="h3 mb-0">Company dashboard</h1>
+    <div class="btn-group">
+        <partial name="_ProjectSwitcher" model="switcher" />
+        <a class="btn btn-outline-secondary btn-sm" asp-controller="Projects" asp-action="Index">All projects</a>
+        <a class="btn btn-outline-secondary btn-sm" asp-controller="Approvals" asp-action="Index">Approvals</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Active projects</div>
+            <div class="fs-3 fw-semibold">@Model.ActiveCount</div>
+            <div class="text-muted small">@Model.Projects.Count total</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">WIP (approved)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.TotalWip)</div>
+            <div class="text-muted small">un-invoiced, all projects</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Pending (open)</div>
+            <div class="fs-3 fw-semibold">@Money(Model.TotalPending)</div>
+            <div class="text-muted small">awaiting approval</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card panel-card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Needs attention</div>
+            <div class="fs-3 fw-semibold @(Model.AtRisk.Count > 0 ? "text-danger" : "")">@Model.AtRisk.Count</div>
+            <div class="text-muted small">over or near budget</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-7">
+        <div class="card panel-card h-100">
+            <div class="card-header">Budget attention — over or past @((int)PortfolioDashboard.NearOverrunPercent)% burn</div>
+            @if (Model.AtRisk.Count == 0)
+            {
+                <div class="card-body text-muted">No projects are near their budget. All clear.</div>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var p in Model.AtRisk)
+                    {
+                        var pct = p.MaxBurnPercent ?? 0;
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <a class="fw-semibold text-decoration-none" asp-controller="Projects" asp-action="Dashboard" asp-route-id="@p.Project.Id">
+                                    @p.ClientName - @p.Project.Name
+                                </a>
+                                <span class="badge @(p.HasOverrun ? "text-bg-danger" : "text-bg-warning")">
+                                    @(p.HasOverrun ? "Over budget" : $"{pct.ToString("0", usd)}% burn")
+                                </span>
+                            </div>
+                            <div class="progress mb-1" role="progressbar" style="height: .5rem">
+                                <div class="progress-bar @BurnBarClass(p.HasOverrun, pct)" style="width: @(Math.Min(100, pct).ToString("0.#", usd))%"></div>
+                            </div>
+                            <div class="small text-muted">
+                                @string.Join(" · ", p.Hotspots(PortfolioDashboard.NearOverrunPercent)
+                                    .Select(h => $"{h.Label} {h.Percent.ToString("0", usd)}%{(h.IsOver ? " (over)" : "")}"))
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card panel-card h-100">
+            <div class="card-header">Deadlines — next @PortfolioDashboard.DeadlineWindowDays days</div>
+            @if (Model.UpcomingDeadlines.Count == 0)
+            {
+                <div class="card-body text-muted">No project end dates in the window.</div>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var d in Model.UpcomingDeadlines)
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                            <div class="text-truncate">
+                                <a class="text-decoration-none" asp-controller="Projects" asp-action="Dashboard" asp-route-id="@d.Item.Project.Id">
+                                    @d.Item.ClientName - @d.Item.Project.Name
+                                </a>
+                                <div class="small text-muted">ends @d.EndDate.ToString("MMM d, yyyy")</div>
+                            </div>
+                            <span class="badge @(d.IsOverdue ? "text-bg-danger" : d.DaysLeft <= 14 ? "text-bg-warning" : "text-bg-light text-muted")">
+                                @(d.IsOverdue ? $"{-d.DaysLeft}d overdue" : d.DaysLeft == 0 ? "today" : $"{d.DaysLeft}d left")
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="card panel-card">
+    <div class="card-header">All projects</div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Project</th>
+                    <th>Status</th>
+                    <th>PM</th>
+                    <th class="text-end">Hours</th>
+                    <th class="text-end">WIP</th>
+                    <th class="text-end">Invoiced</th>
+                    <th style="min-width: 10rem">Burn</th>
+                    <th class="pe-3">End date</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in Model.Projects)
+                {
+                    <tr>
+                        <td class="ps-3">
+                            <a class="text-decoration-none" asp-controller="Projects" asp-action="Dashboard" asp-route-id="@p.Project.Id">
+                                @p.ClientName - @p.Project.Name
+                            </a>
+                            <span class="text-muted small">@p.Project.Code</span>
+                        </td>
+                        <td><span class="badge @StatusBadge(p.Project.Status)">@(p.Project.Status == ProjectStatus.OnHold ? "On hold" : p.Project.Status.ToString())</span></td>
+                        <td>@p.ProjectManagerName</td>
+                        <td class="text-end">@Hrs(p.HoursWorked)</td>
+                        <td class="text-end">@Money(p.ApprovedValue)</td>
+                        <td class="text-end">@Money(p.InvoicedValue)</td>
+                        <td>
+                            @if (p.BurnPercent is { } burn)
+                            {
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress flex-grow-1" role="progressbar" style="height: .5rem">
+                                        <div class="progress-bar @BurnBarClass(p.Budget!.IsOverBudget, burn)" style="width: @(Math.Min(100, burn).ToString("0.#", usd))%"></div>
+                                    </div>
+                                    <span class="small @(p.Budget!.IsOverBudget ? "text-danger fw-semibold" : "text-muted")">@burn.ToString("0", usd)%</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">no budget</span>
+                            }
+                        </td>
+                        <td class="pe-3 text-nowrap">@(p.Project.EndDate?.ToString("MMM d, yyyy") ?? "—")</td>
+                    </tr>
+                }
+                @if (Model.Projects.Count == 0)
+                {
+                    <tr><td colspan="8" class="text-muted text-center py-3">No projects yet.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

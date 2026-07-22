@@ -3,7 +3,7 @@ using Crosscheck.Domain;
 namespace Crosscheck.Infrastructure.Persistence;
 
 /// <summary>Fixed identifiers for rows seeded by SQL scripts (Scripts/0002_seed_phase1.sql).
-/// Code that needs a well-known row (bootstrap Admin, internal client, INT-LEAVE) references these.</summary>
+/// Code that needs a well-known row (bootstrap Admin, internal client) references these.</summary>
 public static class SeedData
 {
     // Roles
@@ -16,11 +16,9 @@ public static class SeedData
     public static readonly Guid AdminEmployeeId = new("b0000000-0000-0000-0000-000000000001");
     public const string AdminEmail = "dwoods@thegeospatialgroup.com";
 
-    // Internal client + leave project (never invoiced)
+    // Internal client (never invoiced; hosts internal non-billable projects if any are needed)
     public static readonly Guid InternalClientId = new("c0000000-0000-0000-0000-000000000001");
     public const string InternalClientName = "The Geospatial Group";
-    public static readonly Guid LeaveProjectId = new("d0000000-0000-0000-0000-000000000001");
-    public const string LeaveProjectCode = "INT-LEAVE";
 
     /// <summary>Stable timestamp for seeded rows — HasData must not produce a new value per migration diff.</summary>
     public static readonly DateTimeOffset SeededAt = new(2026, 7, 8, 0, 0, 0, TimeSpan.Zero);

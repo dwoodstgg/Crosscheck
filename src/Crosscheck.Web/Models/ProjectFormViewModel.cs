@@ -25,6 +25,10 @@ public class ProjectFormViewModel
     [Display(Name = "Project manager")]
     public Guid? ProjectManagerId { get; set; }
 
+    /// <summary>How the project is contracted — drives what the budget asks for.</summary>
+    [Display(Name = "Project type")]
+    public ProjectType ProjectType { get; set; } = ProjectType.Hourly;
+
     [Display(Name = "Start date")]
     [DataType(DataType.Date)]
     public DateOnly? StartDate { get; set; }
@@ -32,11 +36,6 @@ public class ProjectFormViewModel
     [Display(Name = "End date")]
     [DataType(DataType.Date)]
     public DateOnly? EndDate { get; set; }
-
-    /// <summary>What this project calls its budget breakdown — "Modules" or "Milestones".
-    /// Display only; mechanics are identical.</summary>
-    [Display(Name = "Break work down as")]
-    public BreakdownLabel BreakdownLabel { get; set; } = BreakdownLabel.Module;
 
     // Billing overrides — blank inherits the client's default (design decision 18).
     [Display(Name = "Billing contact name")]
@@ -95,9 +94,9 @@ public class ProjectFormViewModel
         Name = project.Name,
         Code = project.Code,
         ProjectManagerId = project.ProjectManagerId,
+        ProjectType = project.Type,
         StartDate = project.StartDate,
         EndDate = project.EndDate,
-        BreakdownLabel = project.BreakdownLabel,
         BillingContactName = project.BillingContactName,
         BillingContactEmail = project.BillingContactEmail,
         PaymentTermsDays = project.PaymentTermsDays,

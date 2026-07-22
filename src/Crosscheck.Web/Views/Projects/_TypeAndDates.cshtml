@@ -1,0 +1,30 @@
+@using Crosscheck.Domain.Enums
+@model ProjectFormViewModel
+
+@* Project type + timeframe. Rendered inside _Form on Create; the Edit page hosts these in
+   the Budget card instead, since the type drives what the budget asks for. Field names stay
+   unprefixed either way — both spots sit inside a form that posts ProjectFormViewModel. *@
+
+<div class="mb-3">
+    <label asp-for="ProjectType" class="form-label"></label>
+    <select asp-for="ProjectType" class="form-select">
+        <option value="@ProjectType.Hourly">Hourly — billed for the hours worked</option>
+        <option value="@ProjectType.FixedRate">Fixed rate — an agreed price for the work</option>
+        <option value="@ProjectType.ServiceContract">Service contract — a set timeframe, billed monthly</option>
+    </select>
+    <div class="form-text" id="project-type-hint">
+        Sets what the budget asks for. A service contract runs over the start–end dates below.
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="StartDate" class="form-label"></label>
+        <input asp-for="StartDate" class="form-control" />
+    </div>
+    <div class="col-md-6 mb-3">
+        <label asp-for="EndDate" class="form-label"></label>
+        <input asp-for="EndDate" class="form-control" />
+        <span asp-validation-for="EndDate" class="text-danger"></span>
+    </div>
+</div>

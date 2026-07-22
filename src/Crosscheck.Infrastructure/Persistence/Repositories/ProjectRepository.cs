@@ -13,7 +13,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
 
     private const string SelectColumns =
         """
-        SELECT p.id, p.client_id, p.name, p.code, p.status, p.closed_at, p.closed_by AS closed_by_id,
+        SELECT p.id, p.client_id, p.name, p.code, p.status, p.project_type, p.closed_at, p.closed_by AS closed_by_id,
                p.project_manager_id, p.start_date, p.end_date, p.currency, p.breakdown_label,
                p.billing_contact_name, p.billing_contact_email,
                p.billing_address::text AS billing_address_json, p.payment_terms_days
@@ -25,7 +25,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ProjectRow>(new CommandDefinition(
             """
-            SELECT p.id, p.client_id, p.name, p.code, p.status, p.closed_at, p.closed_by AS closed_by_id,
+            SELECT p.id, p.client_id, p.name, p.code, p.status, p.project_type, p.closed_at, p.closed_by AS closed_by_id,
                    p.project_manager_id, p.start_date, p.end_date, p.currency, p.breakdown_label,
                    p.billing_contact_name, p.billing_contact_email,
                    p.billing_address::text AS billing_address_json, p.payment_terms_days,
@@ -75,10 +75,10 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO projects
-                (id, client_id, name, code, status, project_manager_id, start_date, end_date, currency,
+                (id, client_id, name, code, status, project_type, project_manager_id, start_date, end_date, currency,
                  breakdown_label, billing_contact_name, billing_contact_email, billing_address, payment_terms_days)
             VALUES
-                (@Id, @ClientId, @Name, @Code, @status, @ProjectManagerId, @StartDate, @EndDate, @Currency,
+                (@Id, @ClientId, @Name, @Code, @status, @projectType, @ProjectManagerId, @StartDate, @EndDate, @Currency,
                  @breakdownLabel, @BillingContactName, @BillingContactEmail, @billingAddressJson::jsonb, @PaymentTermsDays)
             """,
             InsertParams(project),
@@ -94,6 +94,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
                 client_id = @ClientId,
                 name = @Name,
                 code = @Code,
+                project_type = @projectType,
                 project_manager_id = @ProjectManagerId,
                 start_date = @StartDate,
                 end_date = @EndDate,
@@ -124,6 +125,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         project.Name,
         project.Code,
         status = DbEnum.ToDb(project.Status),
+        projectType = DbEnum.ToDb(project.Type),
         project.ProjectManagerId,
         project.StartDate,
         project.EndDate,
@@ -144,6 +146,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         Name = row.Name,
         Code = row.Code,
         Status = DbEnum.FromDb<ProjectStatus>(row.Status),
+        Type = DbEnum.FromDb<ProjectType>(row.ProjectType),
         ClosedAt = row.ClosedAt,
         ClosedById = row.ClosedById,
         ProjectManagerId = row.ProjectManagerId,
@@ -169,6 +172,7 @@ public class ProjectRepository(NpgsqlDataSource dataSource) : IProjectRepository
         public string Name { get; set; } = null!;
         public string Code { get; set; } = null!;
         public string Status { get; set; } = null!;
+        public string ProjectType { get; set; } = null!;
         public DateTimeOffset? ClosedAt { get; set; }
         public Guid? ClosedById { get; set; }
         public Guid ProjectManagerId { get; set; }

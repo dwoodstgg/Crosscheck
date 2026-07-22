@@ -42,7 +42,7 @@ public record RoleBudget(
 /// <summary>Hours budget vs. burn for one project module (design decision #21).
 /// <paramref name="ModuleId"/> null = the "Unassigned" bucket (pre-module entries);
 /// <paramref name="IsDeleted"/> marks a soft-removed module whose history still shows.
-/// <paramref name="Amount"/> is the agreed fixed billing amount (null = T&amp;M) — for a
+/// <paramref name="Amount"/> is the agreed fixed billing amount (null = hourly) — for a
 /// fixed-price module the dollar figures value internal burn only, never the bill.
 /// <paramref name="Roles"/> carries the within-module per-role breakdown (empty for
 /// flat-hours modules).</summary>
@@ -69,8 +69,9 @@ public record ModuleBudget(
 /// that split (billed hours once approved, worked hours while open). Overrun is only flagged,
 /// never blocking (design rule 9). <see cref="Roles"/> carries the per-role hour budgets.</summary>
 public record BudgetStatus(
-    BudgetType Type,
+    ProjectType Type,
     decimal? AmountBudget,
+    decimal? MonthlyAmount,
     decimal? HoursBudget,
     IReadOnlyList<int> AlertThresholds,
     decimal SpentValue,

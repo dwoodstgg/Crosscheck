@@ -1,4 +1,5 @@
 @using System.Globalization
+@using Crosscheck.Application.Projects
 @using Crosscheck.Domain.Enums
 @model ProjectManageViewModel
 @{
@@ -6,14 +7,7 @@
     string Money(decimal v) => v.ToString("C0", usd);
     string Hrs(decimal h) => h.ToString("0.##");
 
-    static string TypeLabel(BudgetType t) => t switch
-    {
-        BudgetType.FixedFee => "Fixed fee",
-        BudgetType.TimeAndMaterialsCap => "T&M cap",
-        BudgetType.HoursCap => "Hours cap",
-        _ => t.ToString(),
-    };
-
+    var project = Model.Project;
     var b = Model.Budget;
     var thresholdText = b is null ? "50, 75, 90" : string.Join(", ", b.AlertThresholds);
     var allocByRole = b?.RoleAllocations.ToDictionary(a => a.RoleId, a => a.Hours) ?? new Dictionary<Guid, decimal>();
@@ -22,30 +16,37 @@
     // budget card only carries the dollar figure and thresholds.
     var hasModules = Model.Modules.Count > 0;
     var moduleHoursTotal = Model.Modules.Sum(m => m.Module.EffectiveHours);
-    var breakdownSingular = Crosscheck.Application.Projects.Terminology.Singular(Model.Project.BreakdownLabel);
-    var breakdownPlural = Crosscheck.Application.Projects.Terminology.Plural(Model.Project.BreakdownLabel);
+    var breakdownSingular = Terminology.Singular(project.BreakdownLabel);
+    var breakdownPlural = Terminology.Plural(project.BreakdownLabel);
+
+    // A service contract's monthly amount sizes the contract total from the project timeframe.
+    // Initial render only — the card's script re-derives it live from the date inputs above.
+    int? contractMonths = project.StartDate is not null && project.EndDate is not null
+        ? BudgetService.ContractMonths(project.StartDate.Value, project.EndDate.Value)
+        : null;
 }
 
 <div class="card panel-card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Budget</span>
-        @if (b is not null)
-        {
-            <span class="badge text-bg-secondary">@TypeLabel(b.Type)</span>
-        }
-    </div>
+    <div class="card-header">Budget</div>
     <div class="card-body">
         <p class="text-muted small mb-3">
-            A budget flags overrun on the <a asp-action="Dashboard" asp-route-id="@Model.Project.Id">dashboard</a> —
+            A budget flags overrun on the <a asp-action="Dashboard" asp-route-id="@project.Id">dashboard</a> —
             it never blocks time entry or closes the project. Every change is kept as a revision.
         </p>
+
+        <partial name="_TypeAndDates" model="Model.Form" />
 
         @if (b is not null)
         {
             <dl class="row mb-3 small">
+                @if (b.MonthlyAmount is not null)
+                {
+                    <dt class="col-5 text-muted fw-normal">Monthly amount</dt>
+                    <dd class="col-7 text-end fw-semibold">@Money(b.MonthlyAmount.Value)/mo</dd>
+                }
                 @if (b.Amount is not null)
                 {
-                    <dt class="col-5 text-muted fw-normal">Dollar budget</dt>
+                    <dt class="col-5 text-muted fw-normal">@(b.MonthlyAmount is not null ? "Contract total" : project.Type == ProjectType.FixedRate ? "Contract amount" : "Dollar budget")</dt>
                     <dd class="col-7 text-end fw-semibold">@Money(b.Amount.Value)</dd>
                 }
                 @if (hasModules)
@@ -84,29 +85,32 @@
         <div class="inline-add">
             <div class="inline-add-title">@(b is null ? "Set budget" : "Revise budget")</div>
             <div class="row g-2">
-                <div class="col-6">
-                    <label class="form-label small mb-1">Type</label>
-                    <select id="budget-type" name="budgetType" class="form-select form-select-sm">
-                        @foreach (var t in new[] { BudgetType.FixedFee, BudgetType.TimeAndMaterialsCap, BudgetType.HoursCap })
-                        {
-                            <option value="@t" selected="@(b?.Type == t)">@TypeLabel(t)</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-6">
-                    <label class="form-label small mb-1">Break work down as</label>
-                    <select name="BreakdownLabel" class="form-select form-select-sm"
-                            title="What this work order calls its budget sections — display only, both work the same">
-                        <option value="@BreakdownLabel.Module" selected="@(Model.Form.BreakdownLabel == BreakdownLabel.Module)">Modules</option>
-                        <option value="@BreakdownLabel.Milestone" selected="@(Model.Form.BreakdownLabel == BreakdownLabel.Milestone)">Milestones</option>
-                    </select>
-                </div>
                 <div class="col-6" id="budget-amount-field">
-                    <label class="form-label small mb-1">Dollar amount</label>
+                    <label class="form-label small mb-1" id="budget-amount-label">Dollar budget</label>
                     <div class="input-group input-group-sm">
                         <span class="input-group-text">$</span>
                         <input name="budgetAmount" type="number" step="0.01" min="0" class="form-control"
-                               value="@(b?.Amount?.ToString("0.##"))" placeholder="—" />
+                               value="@(b?.MonthlyAmount is null ? b?.Amount?.ToString("0.##") : null)" placeholder="—" />
+                    </div>
+                </div>
+                <div class="col-6" id="budget-monthly-field">
+                    <label class="form-label small mb-1">Monthly amount</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">$</span>
+                        <input name="budgetMonthlyAmount" type="number" step="0.01" min="0" class="form-control"
+                               value="@(b?.MonthlyAmount?.ToString("0.##"))" placeholder="—" />
+                        <span class="input-group-text">/mo</span>
+                    </div>
+                    <div class="form-text" id="contract-months-hint">
+                        @if (contractMonths is int cm)
+                        {
+                            <text>Contract runs @project.StartDate!.Value.ToString("MMM d, yyyy") – @project.EndDate!.Value.ToString("MMM d, yyyy")
+                            (@cm months) — the total budget is the monthly amount × @cm. Months can run heavy or light; burn is measured against the whole contract.</text>
+                        }
+                        else
+                        {
+                            <text>Set the start and end dates above so the monthly amount can size the contract total.</text>
+                        }
                     </div>
                 </div>
                 @if (hasModules)
@@ -121,7 +125,7 @@
                 else
                 {
                     <div class="col-6" id="budget-hours-field">
-                        <label class="form-label small mb-1">Hours cap</label>
+                        <label class="form-label small mb-1">Hours budget <span class="text-muted">(optional)</span></label>
                         <input name="budgetHours" type="number" step="0.25" min="0" class="form-control form-control-sm"
                                value="@(b?.Hours?.ToString("0.##"))" placeholder="—" />
                     </div>
@@ -158,30 +162,63 @@
         </div>
 
         <script>
-            // Only the fields the chosen budget type needs: dollar types (fixed fee / T&M cap)
-            // show the dollar figure; an hours cap shows the hours fields. Hidden inputs are
-            // disabled so they don't post. On a project with modules the hours fields are
-            // already replaced by the per-@breakdownSingular rollup note.
+            // The budget asks only for what the project type needs: hourly shows an optional
+            // dollar/hours cap, fixed rate asks for the contract amount, and a service contract
+            // asks for the monthly amount (total = monthly × contract months). The type select
+            // sits at the top of this card, so the fields follow it live.
+            // Hidden inputs are disabled so they don't post.
             (function () {
-                const type = document.getElementById('budget-type');
+                const type = document.getElementById('ProjectType');
                 const fields = {
                     amount: document.getElementById('budget-amount-field'),
+                    monthly: document.getElementById('budget-monthly-field'),
                     hours: document.getElementById('budget-hours-field'),
                     roleHours: document.getElementById('budget-rolehours-field'),
                 };
+                const amountLabel = document.getElementById('budget-amount-label');
                 function toggle(el, show) {
                     if (!el) return;
                     el.classList.toggle('d-none', !show);
                     el.querySelectorAll('input').forEach(i => i.disabled = !show);
                 }
                 function sync() {
-                    const hoursCap = type.value === 'HoursCap';
-                    toggle(fields.amount, !hoursCap);
-                    toggle(fields.hours, hoursCap);
-                    toggle(fields.roleHours, hoursCap);
+                    const service = type.value === 'ServiceContract';
+                    toggle(fields.amount, !service);
+                    toggle(fields.monthly, service);
+                    toggle(fields.hours, !service);
+                    toggle(fields.roleHours, !service);
+                    amountLabel.textContent = type.value === 'FixedRate' ? 'Contract amount' : 'Dollar budget (optional)';
                 }
                 type.addEventListener('change', sync);
                 sync();
+
+                // The contract-months hint follows the date inputs above live (the server-rendered
+                // text reflects only the saved dates). Same month math as BudgetService.ContractMonths:
+                // inclusive calendar months, e.g. Jan 15 – Dec 1 = 12.
+                const start = document.getElementById('StartDate');
+                const end = document.getElementById('EndDate');
+                const hint = document.getElementById('contract-months-hint');
+                function syncHint() {
+                    if (!hint || !start || !end) return;
+                    if (!start.value || !end.value) {
+                        hint.textContent = 'Set the start and end dates above so the monthly amount can size the contract total.';
+                        return;
+                    }
+                    const s = new Date(start.value + 'T00:00:00');
+                    const e = new Date(end.value + 'T00:00:00');
+                    const months = (e.getFullYear() - s.getFullYear()) * 12 + e.getMonth() - s.getMonth() + 1;
+                    if (months < 1) {
+                        hint.textContent = 'The end date is before the start date — fix the dates above so the monthly amount can size the contract total.';
+                        return;
+                    }
+                    const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    hint.textContent = `Contract runs ${fmt(s)} – ${fmt(e)} (${months} month${months === 1 ? '' : 's'}) — ` +
+                        `the total budget is the monthly amount × ${months}. Months can run heavy or light; ` +
+                        'burn is measured against the whole contract.';
+                }
+                start?.addEventListener('change', syncHint);
+                end?.addEventListener('change', syncHint);
+                syncHint();
             })();
         </script>
 
@@ -201,7 +238,7 @@
                                 <span class="text-muted">@r.RevisedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
                             </div>
                             <div class="text-muted">
-                                @TypeLabel(r.ToType)
+                                @Terminology.ProjectTypeLabel(r.ToType)
                                 @if (r.FromAmount is not null && r.FromAmount != r.ToAmount)
                                 {
                                     <span>· was @Money(r.FromAmount.Value)</span>
@@ -210,7 +247,7 @@
                             </div>
                             @if (!string.IsNullOrWhiteSpace(r.Reason))
                             {
-                                <div class="fst-italic">“@r.Reason”</div>
+                                <div class="fst-italic">"@r.Reason"</div>
                             }
                         </li>
                     }

@@ -28,7 +28,13 @@ public class ProjectsController(
     public async Task<IActionResult> Dashboard(Guid id, CancellationToken cancellationToken)
     {
         var dashboard = await dashboardService.GetAsync(id, cancellationToken);
-        return dashboard is null ? NotFound() : View(dashboard);
+        if (dashboard is null)
+        {
+            return NotFound();
+        }
+
+        ViewBag.SwitcherProjects = await projectAdmin.ListAsync(cancellationToken);
+        return View(dashboard);
     }
 
     [HttpGet]
@@ -50,7 +56,8 @@ public class ProjectsController(
         {
             await projectAdmin.CreateAsync(
                 model.ClientId!.Value, model.Name!, model.Code!, model.ProjectManagerId!.Value,
-                model.StartDate, model.EndDate, model.ToBillingInput(), model.BreakdownLabel, cancellationToken);
+                model.ProjectType, model.StartDate, model.EndDate, model.ToBillingInput(),
+                cancellationToken: cancellationToken);
             return RedirectToAction(nameof(Index));
         }
         catch (DomainException ex)
@@ -71,7 +78,7 @@ public class ProjectsController(
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(
         Guid id, ProjectFormViewModel model,
-        BudgetType budgetType, decimal? budgetAmount, decimal? budgetHours,
+        decimal? budgetAmount, decimal? budgetHours, decimal? budgetMonthlyAmount,
         string? budgetThresholds, string? budgetReason,
         Dictionary<Guid, decimal?>? roleHours, CancellationToken cancellationToken)
     {
@@ -90,17 +97,20 @@ public class ProjectsController(
         {
             await projectAdmin.UpdateAsync(
                 id, model.ClientId!.Value, model.Name!, model.Code!, model.ProjectManagerId!.Value,
-                model.StartDate, model.EndDate, model.ToBillingInput(), model.BreakdownLabel, cancellationToken);
+                model.ProjectType, model.StartDate, model.EndDate, model.ToBillingInput(), cancellationToken);
 
             // The budget shares this one Save. Only touch it when the submitted values actually
             // differ from the current budget — SetBudgetAsync writes a revision on every call, so
             // an unconditional call would append a no-op revision each time Details is saved.
+            var project = await projectAdmin.GetAsync(id, cancellationToken);
             var current = await budgetService.GetAsync(id, cancellationToken);
             var thresholds = BudgetService.NormalizeThresholds(ParseThresholds(budgetThresholds));
-            if (BudgetChanged(current, budgetType, budgetAmount, budgetHours, thresholds, allocations))
+            if (project is not null
+                && BudgetChanged(project, current, budgetAmount, budgetHours, budgetMonthlyAmount, thresholds, allocations))
             {
                 await budgetService.SetBudgetAsync(
-                    id, budgetType, budgetAmount, budgetHours, thresholds, budgetReason, allocations, cancellationToken);
+                    id, budgetAmount, budgetHours, budgetMonthlyAmount, thresholds, budgetReason,
+                    allocations, cancellationToken);
             }
 
             return RedirectToAction(nameof(Edit), new { id });
@@ -113,19 +123,27 @@ public class ProjectsController(
         }
     }
 
-    /// <summary>True when the submitted budget both carries something (amount, hours, or per-role
-    /// hours) and differs from what's stored — so we skip the revision when nothing changed and
-    /// never create an empty budget. Mirrors <see cref="BudgetService.SetBudgetAsync"/>'s rules:
-    /// overall hours default to the sum of role allocations; the reason never lives on the budget
-    /// row so it isn't part of the comparison.</summary>
+    /// <summary>True when the submitted budget both carries something (amount, monthly amount,
+    /// hours, or per-role hours) and differs from what's stored — so we skip the revision when
+    /// nothing changed and never create an empty budget. Mirrors
+    /// <see cref="BudgetService.SetBudgetAsync"/>'s rules: overall hours default to the sum of
+    /// role allocations; a service contract's monthly amount sizes the stored total from the
+    /// project timeframe; the reason never lives on the budget row so it isn't compared.</summary>
     private static bool BudgetChanged(
-        Budget? current, BudgetType type, decimal? amount, decimal? hours,
+        Project project, Budget? current, decimal? amount, decimal? hours, decimal? monthlyAmount,
         int[] thresholds, IReadOnlyList<RoleHourInput>? allocations)
     {
         var allocDict = allocations?.ToDictionary(a => a.RoleId, a => a.Hours) ?? [];
         var effectiveHours = hours ?? (allocDict.Count > 0 ? allocDict.Values.Sum() : (decimal?)null);
 
-        var provided = amount is not null || effectiveHours is not null || allocDict.Count > 0;
+        if (project.Type == ProjectType.ServiceContract && monthlyAmount is not null
+            && project is { StartDate: not null, EndDate: not null })
+        {
+            amount = monthlyAmount.Value * BudgetService.ContractMonths(project.StartDate.Value, project.EndDate.Value);
+        }
+
+        var provided = amount is not null || monthlyAmount is not null
+            || effectiveHours is not null || allocDict.Count > 0;
         if (!provided)
         {
             return false;
@@ -136,7 +154,8 @@ public class ProjectsController(
             return true;
         }
 
-        if (type != current.Type || amount != current.Amount || effectiveHours != current.Hours
+        if (project.Type != current.Type || amount != current.Amount
+            || monthlyAmount != current.MonthlyAmount || effectiveHours != current.Hours
             || !thresholds.SequenceEqual(current.AlertThresholds))
         {
             return true;
@@ -202,6 +221,36 @@ public class ProjectsController(
     }
 
     // Modules ------------------------------------------------------------------
+
+    /// <summary>Instant-apply switch for what the project calls its breakdown sections —
+    /// posted straight from the Modules/Milestones card header so the wording flips
+    /// immediately instead of waiting on the page-level Save.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetBreakdownLabel(
+        Guid id, BreakdownLabel breakdownLabel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await projectAdmin.SetBreakdownLabelAsync(id, breakdownLabel, cancellationToken);
+        }
+        catch (DomainException ex)
+        {
+            TempData["Error"] = ex.Message;
+            return RedirectToAction(nameof(Edit), new { id });
+        }
+
+        // The card's script posts via fetch and swaps in the re-rendered card, so the rest
+        // of the page keeps unsaved input and scroll position. Plain form posts (no JS)
+        // still get the redirect.
+        if (Request.Headers.XRequestedWith == "XMLHttpRequest")
+        {
+            var page = await BuildManagePageAsync(id, form: null, cancellationToken);
+            return page is null ? NotFound() : PartialView("_ModulesCard", page);
+        }
+
+        return RedirectToAction(nameof(Edit), new { id });
+    }
 
     [HttpPost]
     [ValidateAntiForgeryToken]

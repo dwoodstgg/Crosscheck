@@ -12,6 +12,7 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
     private NpgsqlDataSource _dataSource = null!;
     private ModuleRepository _modules = null!;
     private RateCardRepository _rateCards = null!;
+    private Guid _projectId;
 
     public async Task InitializeAsync()
     {
@@ -21,6 +22,7 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         _dataSource = NpgsqlDataSource.Create(_postgres.GetConnectionString());
         _modules = new ModuleRepository(_dataSource);
         _rateCards = new RateCardRepository(_dataSource);
+        _projectId = await TestData.InsertProjectAsync(_dataSource);
     }
 
     public async Task DisposeAsync()
@@ -29,10 +31,10 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    private static ProjectModule NewModule(string name = "Ag Chem", int sortOrder = 1) => new()
+    private ProjectModule NewModule(string name = "Ag Chem", int sortOrder = 1) => new()
     {
         Id = Guid.NewGuid(),
-        ProjectId = SeedData.LeaveProjectId,
+        ProjectId = _projectId,
         Name = name,
         SortOrder = sortOrder,
     };
@@ -49,7 +51,7 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         ];
         await _modules.AddAsync(module);
 
-        var loaded = Assert.Single(await _modules.GetForProjectAsync(SeedData.LeaveProjectId));
+        var loaded = Assert.Single(await _modules.GetForProjectAsync(_projectId));
         Assert.Equal("Ag Chem", loaded.Name);
         Assert.Equal(41040.00m, loaded.Amount);
         Assert.True(loaded.IsFixedPrice);
@@ -58,7 +60,7 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         Assert.Equal(2, loaded.Allocations.Count);
         Assert.Contains(loaded.Allocations, a => a.RoleName == "Developer" && a.Hours == 240m);
 
-        Assert.True(await _modules.HasLiveModulesAsync(SeedData.LeaveProjectId));
+        Assert.True(await _modules.HasLiveModulesAsync(_projectId));
     }
 
     [Fact]
@@ -104,9 +106,9 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         await Assert.ThrowsAsync<PostgresException>(() => _modules.AddAsync(NewModule("water levels")));
 
         await _modules.SoftDeleteAsync(module.Id);
-        Assert.False(await _modules.HasLiveModulesAsync(SeedData.LeaveProjectId));
-        Assert.Empty(await _modules.GetForProjectAsync(SeedData.LeaveProjectId));
-        Assert.Single(await _modules.GetForProjectAsync(SeedData.LeaveProjectId, includeDeleted: true));
+        Assert.False(await _modules.HasLiveModulesAsync(_projectId));
+        Assert.Empty(await _modules.GetForProjectAsync(_projectId));
+        Assert.Single(await _modules.GetForProjectAsync(_projectId, includeDeleted: true));
 
         // The live-name index ignores soft-deleted rows, so the name can be reused.
         await _modules.AddAsync(NewModule("Water Levels"));
@@ -157,28 +159,28 @@ public sealed class ModuleRepositoryTests : IAsyncLifetime
         // Project rate only.
         await _rateCards.AddAsync(new ProjectRateCard
         {
-            Id = Guid.NewGuid(), ProjectId = SeedData.LeaveProjectId, RoleId = SeedData.DeveloperRoleId, HourlyRate = 135.00m,
+            Id = Guid.NewGuid(), ProjectId = _projectId, RoleId = SeedData.DeveloperRoleId, HourlyRate = 135.00m,
         });
-        Assert.Equal(135.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, module.Id, SeedData.DeveloperRoleId));
+        Assert.Equal(135.00m, await _rateCards.ResolveAsync(_projectId, module.Id, SeedData.DeveloperRoleId));
 
         // Module-wide override beats the project rate.
         await _modules.AddRateAsync(new ProjectModuleRate
         {
             Id = Guid.NewGuid(), ModuleId = module.Id, RoleId = null, HourlyRate = 85.00m,
         });
-        Assert.Equal(85.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, module.Id, SeedData.DeveloperRoleId));
+        Assert.Equal(85.00m, await _rateCards.ResolveAsync(_projectId, module.Id, SeedData.DeveloperRoleId));
 
         // Role-specific override beats both.
         await _modules.AddRateAsync(new ProjectModuleRate
         {
             Id = Guid.NewGuid(), ModuleId = module.Id, RoleId = SeedData.DeveloperRoleId, HourlyRate = 150.00m,
         });
-        Assert.Equal(150.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, module.Id, SeedData.DeveloperRoleId));
+        Assert.Equal(150.00m, await _rateCards.ResolveAsync(_projectId, module.Id, SeedData.DeveloperRoleId));
 
         // A role without overrides still falls through to the (absent) project rate.
-        Assert.Equal(85.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, module.Id, SeedData.ProjectManagerRoleId));
+        Assert.Equal(85.00m, await _rateCards.ResolveAsync(_projectId, module.Id, SeedData.ProjectManagerRoleId));
 
         // No module → straight to the project rate.
-        Assert.Equal(135.00m, await _rateCards.ResolveAsync(SeedData.LeaveProjectId, null, SeedData.DeveloperRoleId));
+        Assert.Equal(135.00m, await _rateCards.ResolveAsync(_projectId, null, SeedData.DeveloperRoleId));
     }
 }

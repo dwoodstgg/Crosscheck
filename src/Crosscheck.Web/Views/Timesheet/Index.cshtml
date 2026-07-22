@@ -16,12 +16,15 @@
             <button type="button" class="btn btn-sm btn-primary" id="ts-layout-grid">Grid</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="ts-layout-daily">Daily</button>
         </div>
+        @* Week view is parked for now (month matches the workbook). The controller still
+           serves ?view=week — restore this toggle to bring it back.
         <div class="btn-group" role="group" aria-label="View">
             <a class="btn btn-sm @(Model.IsWeek ? "btn-primary" : "btn-outline-secondary")"
                asp-action="Index" asp-route-view="week" asp-route-anchor="@Model.CurrentAnchor.ToString("yyyy-MM-dd")">Week</a>
             <a class="btn btn-sm @(Model.IsWeek ? "btn-outline-secondary" : "btn-primary")"
                asp-action="Index" asp-route-view="month" asp-route-anchor="@Model.CurrentAnchor.ToString("yyyy-MM-dd")">Month</a>
         </div>
+        *@
     </div>
 </div>
 
@@ -59,13 +62,18 @@
 </p>
 
 <div class="ts-wrap">
-    <table class="ts-grid" id="ts-grid" data-save-url="@Url.Action("SaveHours")">
+    @* data-auto-days: weekday holidays (day-of-month) that self-fill with 8h of Holiday
+       leave when left empty — W-2 only, blank for 1099 timesheets. *@
+    <table class="ts-grid" id="ts-grid" data-save-url="@Url.Action("SaveHours")"
+           data-expected-work="@(Model.WorkdayCount * 8)" data-show-leave="@(Model.ShowLeave ? "1" : "0")"
+           data-auto-days="@(Model.ShowLeave ? string.Join(",", Model.Days.Where(d => d.IsHoliday && !d.IsWeekend).Select(d => d.Day)) : "")">
         <thead>
             <tr>
                 <th class="ts-proj">Project</th>
                 @foreach (var d in Model.Days)
                 {
-                    <th class="@(d.IsWeekend ? "ts-weekend" : "") @(d.Date == today ? "ts-today" : "")">@d.Day<span class="ts-dow">@d.WeekdayLabel</span></th>
+                    <th class="@(d.IsWeekend ? "ts-weekend" : "") @(d.IsHoliday ? "ts-holiday" : "") @(d.Date == today ? "ts-today" : "")"
+                        title="@d.HolidayName">@d.Day<span class="ts-dow">@d.WeekdayLabel</span></th>
                 }
                 <th class="ts-total">Total</th>
             </tr>
@@ -88,7 +96,7 @@
                         row.Cells.TryGetValue(d.DayNumber, out var cell);
                         var status = cell?.Status ?? "open";
                         var editable = !row.ReadOnly && !d.Locked && status != "invoiced";
-                        <td class="ts-cell @(d.IsWeekend ? "ts-weekend" : "") @(d.Date == today ? "ts-today" : "") @(status == "invoiced" ? "approved" : "")"
+                        <td class="ts-cell @(d.IsWeekend ? "ts-weekend" : "") @(d.IsHoliday ? "ts-holiday" : "") @(d.Date == today ? "ts-today" : "") @(status == "invoiced" ? "approved" : "")"
                             data-date="@d.Date.ToString("yyyy-MM-dd")">
                             <input type="text" inputmode="decimal" maxlength="5" autocomplete="off"
                                    class="ts-hours"
@@ -109,18 +117,87 @@
                 </tr>
             }
         </tbody>
+        @* Workbook-style totals (mirrors the Excel timesheet). Leave is never logged as
+           time — it is derived: an untouched holiday auto-credits 8h of Holiday leave, and
+           Personal leave counts down from the month's expected hours as time is entered. *@
         <tfoot>
-            <tr>
+            <tr class="ts-foot-work">
+                <td class="ts-proj">Total</td>
+                @foreach (var d in Model.Days)
+                {
+                    <td class="ts-col-total @(d.IsWeekend ? "ts-weekend" : "")" data-day="@d.Day">0</td>
+                }
+                <td class="ts-total" id="ts-total-work">0</td>
+            </tr>
+            @* The leave section only applies to W-2 staff — 1099 subcontractors are paid
+               for hours worked, so no holiday credit, countdown, or extended-week rows. *@
+            @if (Model.ShowLeave)
+            {
+            <tr class="ts-foot-leave ts-foot-hol">
+                <td class="ts-proj"></td>
+                <td class="ts-span-label" colspan="@Model.Days.Count">Leave – Holiday</td>
+                <td class="ts-total" id="ts-total-hol">0</td>
+            </tr>
+            @* Leave – Personal is the workbook countdown: the month's expected work hours
+               (workdays × 8, holidays excluded) minus everything entered so far. Extended
+               Work Week is the overflow — hours entered beyond that expectation. *@
+            <tr class="ts-foot-leave ts-foot-per">
+                <td class="ts-proj"></td>
+                <td class="ts-span-label" colspan="@Model.Days.Count">Leave – Personal</td>
+                <td class="ts-total" id="ts-total-per">0</td>
+            </tr>
+            <tr class="ts-foot-leave ts-foot-eww">
+                <td class="ts-proj"></td>
+                <td class="ts-span-label" colspan="@Model.Days.Count">Extended Work Week (Extra Hours)</td>
+                <td class="ts-total" id="ts-total-eww">0</td>
+            </tr>
+            }
+            <tr class="ts-foot-daily">
                 <td class="ts-proj">Daily total</td>
                 @foreach (var d in Model.Days)
                 {
                     <td class="ts-col-total @(d.IsWeekend ? "ts-weekend" : "") @(d.Date == today ? "ts-today" : "")" data-day="@d.Day">0</td>
                 }
-                <td class="ts-total" id="ts-grand-total">0</td>
+                @if (Model.ShowLeave)
+                {
+                    <td class="ts-total" id="ts-grand-total"
+                        title="Expected @Model.ExpectedHours.ToString("0.##") h: @Model.WorkdayCount workdays × 8@(Model.HolidayCount > 0 ? $" + {Model.HolidayCount * 8} holiday" : "")">0<span class="ts-expected">of @Model.ExpectedHours.ToString("0.##")</span></td>
+                }
+                else
+                {
+                    <td class="ts-total" id="ts-grand-total">0</td>
+                }
+            </tr>
+            <tr class="ts-foot-weekly">
+                <td class="ts-proj">Weekly total</td>
+                @foreach (var week in Model.Weeks)
+                {
+                    <td class="ts-week-total" colspan="@week.Count"
+                        data-days="@string.Join(",", week.Select(d => d.Day))">0</td>
+                }
+                <td class="ts-total"></td>
             </tr>
         </tfoot>
     </table>
 </div>
+@if (Model.ShowLeave)
+{
+<p class="text-muted small mt-2 mb-0">
+    @Model.RangeLabel has <strong>@Model.WorkdayCount</strong> workdays@(Model.HolidayCount > 0 ? $" and {Model.HolidayCount} holiday{(Model.HolidayCount == 1 ? "" : "s")}" : "")
+    = <strong>@Model.ExpectedHours.ToString("0.##") h</strong> expected. Weeks can vary — only the
+    @(Model.IsWeek ? "week" : "month") total needs to line up. Holidays are greyed out: leave one
+    empty and 8 h of Holiday leave counts automatically, or log the time you actually worked.
+    Leave – Personal counts down the hours still unaccounted for; time past the expectation
+    lands in Extended Work Week.
+</p>
+}
+else
+{
+<p class="text-muted small mt-2 mb-0">
+    Holidays are greyed out for reference. Hours are billed as worked — there's no leave or
+    expected-hours tracking on a 1099 timesheet.
+</p>
+}
 
 <div id="ts-grid-nav" class="d-flex justify-content-center mt-3">
     <div class="btn-group" role="group" aria-label="Navigation">
@@ -176,25 +253,67 @@
         // whole number's own zero (10 -> "10"), unlike a trailing-zero regex would.
         const show = (v, zero) => { const n = Math.round(num(v) * 100) / 100; return n ? String(n) : zero; };
 
+        // Totals the way the Excel workbook does: leave is never logged as time — it is
+        // derived. "Total" is everything entered plus any holiday credit; Leave – Holiday is
+        // the automatic 8h for each untouched holiday; Leave – Personal counts DOWN from the
+        // month's expected work hours as time is entered; Extended Work Week catches hours
+        // beyond that.
         function recalc() {
-            const cols = {};
-            let grand = 0;
+            const leaveHol = {}, all = {};
+            let entered = 0;                        // everything typed in, any project
             grid.querySelectorAll('tbody tr').forEach(tr => {
                 let rowTotal = 0;
                 tr.querySelectorAll('.ts-hours').forEach(inp => {
                     const h = num(inp.value);
                     rowTotal += h;
                     const day = inp.closest('.ts-cell').dataset.date.slice(-2);
-                    cols[day] = (cols[day] || 0) + h;
+                    all[day] = (all[day] || 0) + h;
                 });
                 tr.querySelector('.ts-row-total').textContent = show(rowTotal, '0');
-                grand += rowTotal;
+                entered += rowTotal;
             });
-            grid.querySelectorAll('.ts-col-total').forEach(td => {
-                const day = String(td.dataset.day).padStart(2, '0');
-                td.textContent = show(cols[day] || 0, '0');
+
+            // Empty weekday holidays self-fill: 8h of Holiday leave counts automatically
+            // (the workbook habit — leave the holiday blank and the 8 lands in the totals).
+            // Logging any hours that day, on any project, replaces the credit. The credited
+            // 8 shows in the Daily total row, styled as implied (ts-auto).
+            let credits = 0;
+            const creditDays = new Set();
+            (grid.dataset.autoDays || '').split(',').filter(Boolean).forEach(d => {
+                const day = d.padStart(2, '0');
+                if (!(all[day] > 0)) { leaveHol[day] = 8; all[day] = 8; credits += 8; creditDays.add(day); }
             });
-            document.getElementById('ts-grand-total').textContent = show(grand, '0');
+
+            const sum = m => Object.values(m).reduce((a, b) => a + b, 0);
+            const fill = (rowSel, cols, zero) =>
+                grid.querySelectorAll(rowSel + ' .ts-col-total').forEach(td => {
+                    const day = String(td.dataset.day).padStart(2, '0');
+                    // Weekend columns stay blank at zero — the solid grey stripe reads
+                    // cleaner without a row of zeros, like the workbook.
+                    td.textContent = show(cols[day] || 0, td.classList.contains('ts-weekend') ? '' : zero);
+                });
+            // Both the Total and Daily total rows include the credited holiday 8, styled
+            // as implied (ts-auto) so it reads as derived rather than typed.
+            fill('.ts-foot-work', all, '0');
+            fill('.ts-foot-daily', all, '0');
+            grid.querySelectorAll('.ts-foot-work .ts-col-total, .ts-foot-daily .ts-col-total').forEach(td =>
+                td.classList.toggle('ts-auto', creditDays.has(String(td.dataset.day).padStart(2, '0'))));
+            grid.querySelectorAll('.ts-week-total').forEach(td => {
+                let weekTotal = 0;
+                td.dataset.days.split(',').forEach(d => weekTotal += all[d.padStart(2, '0')] || 0);
+                td.textContent = show(weekTotal, '0');
+            });
+
+            // The three leave ids only exist on W-2 timesheets — 1099 grids omit the rows
+            // (and their data-auto cells, so `credits` stays 0 there).
+            const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+            const expectedWork = num(grid.dataset.expectedWork);
+            set('ts-total-work', show(entered + credits, '0'));
+            set('ts-total-hol', show(sum(leaveHol), '0'));
+            set('ts-total-per', show(Math.max(0, expectedWork - entered), '0'));
+            set('ts-total-eww', show(Math.max(0, entered - expectedWork), '0'));
+            // First child is the number's text node; the "of N" expected label follows it.
+            document.getElementById('ts-grand-total').firstChild.textContent = show(entered + credits, '0');
         }
 
         function flash(cell, cls) {
@@ -432,6 +551,12 @@
             };
         }
 
+        // An empty weekday holiday reads as its automatic 8h of Holiday leave.
+        function dayTotalLabel(card, total) {
+            if (total > 0) return show(total, '0') + ' h';
+            return card.dataset.autoHol === '1' ? '8 h · holiday' : '0 h';
+        }
+
         function applySavedDaily(tr, data) {
             tr.dataset.hours = data.cleared ? '' : show(data.hours, '');
             tr.dataset.notes = data.cleared ? '' : (data.notes || '');
@@ -441,7 +566,7 @@
             const card = tr.closest('.ts-day-card');
             let total = 0;
             card.querySelectorAll('tbody tr').forEach(r => total += num(r.dataset.hours));
-            card.querySelector('.ts-day-total').textContent = show(total, '0') + ' h';
+            card.querySelector('.ts-day-total').textContent = dayTotalLabel(card, total);
         }
 
         function renderDaily(data) {
@@ -472,10 +597,14 @@
                 const card = document.createElement('div');
                 card.className = 'card ts-day-card'
                     + (isWeekend ? ' ts-day-weekend' : '')
+                    + (day.holiday ? ' ts-day-holiday' : '')
                     + (day.date === todayIso ? ' ts-day-today' : '');
+                card.dataset.autoHol = grid.dataset.showLeave === '1' && day.holiday && !isWeekend ? '1' : '0';
                 card.innerHTML = '<div class="card-header d-flex justify-content-between align-items-center">'
-                    + '<span class="fw-semibold">' + esc(dayLabel(day.date)) + '</span>'
-                    + '<span class="text-muted small ts-day-total">' + show(total, '0') + ' h</span></div>' + body;
+                    + '<span class="fw-semibold">' + esc(dayLabel(day.date))
+                    + (day.holiday ? ' <span class="badge text-bg-secondary fw-normal">' + esc(day.holiday) + '</span>' : '')
+                    + '</span>'
+                    + '<span class="text-muted small ts-day-total">' + dayTotalLabel(card, total) + '</span></div>' + body;
                 frag.appendChild(card);
             });
             dailyCards.replaceChildren(frag);

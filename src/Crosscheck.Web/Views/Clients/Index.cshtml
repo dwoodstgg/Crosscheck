@@ -52,11 +52,12 @@
                     </span>
                 </td>
                 <td class="text-end">
-                    <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@client.Id">Edit</a>
+                    <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@client.Id" title="Edit" aria-label="Edit"><i class="bi bi-pencil"></i></a>
                     <form asp-action="SetActive" asp-route-id="@client.Id" method="post" class="d-inline">
                         <input type="hidden" name="isActive" value="@((!client.IsActive).ToString())" />
-                        <button type="submit" class="btn btn-sm @(client.IsActive ? "btn-outline-danger" : "btn-outline-success")">
-                            @(client.IsActive ? "Deactivate" : "Reactivate")
+                        <button type="submit" class="btn btn-sm @(client.IsActive ? "btn-outline-danger" : "btn-outline-success")"
+                                title="@(client.IsActive ? "Deactivate" : "Reactivate")" aria-label="@(client.IsActive ? "Deactivate" : "Reactivate")">
+                            <i class="bi @(client.IsActive ? "bi-slash-circle" : "bi-arrow-counterclockwise")"></i>
                         </button>
                     </form>
                 </td>

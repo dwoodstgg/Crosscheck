@@ -12,11 +12,11 @@ public class BudgetRevision
     public Guid RevisedById { get; set; }
     public DateTimeOffset RevisedAt { get; set; }
 
-    public BudgetType? FromType { get; set; }
+    public ProjectType? FromType { get; set; }
     public decimal? FromAmount { get; set; }
     public decimal? FromHours { get; set; }
 
-    public BudgetType ToType { get; set; }
+    public ProjectType ToType { get; set; }
     public decimal? ToAmount { get; set; }
     public decimal? ToHours { get; set; }
 

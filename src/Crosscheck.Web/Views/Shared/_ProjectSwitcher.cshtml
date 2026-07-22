@@ -1,0 +1,20 @@
+@model Crosscheck.Web.Models.ProjectSwitcherViewModel
+
+@* Searchable project-dashboard jump list. Behavior lives in site.js (initProjectSwitcher). *@
+<div class="btn-group" role="group">
+    <button type="button" class="@Model.ButtonClass dropdown-toggle" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+        @Model.ButtonLabel
+    </button>
+    <div class="dropdown-menu dropdown-menu-end p-2" id="project-switcher" style="min-width: 22rem;">
+        <input type="search" class="form-control form-control-sm mb-2" id="project-switcher-search"
+               placeholder="Search projects…" autocomplete="off" aria-label="Search projects" />
+        <div id="project-switcher-list" class="overflow-y-auto" style="max-height: 40vh;">
+            @foreach (var item in Model.Items.OrderBy(i => i.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                <a class="dropdown-item text-truncate @(item.Id == Model.CurrentProjectId ? "active" : "")"
+                   asp-controller="Projects" asp-action="Dashboard" asp-route-id="@item.Id">@item.Label</a>
+            }
+        </div>
+        <div id="project-switcher-empty" class="dropdown-item disabled d-none">No matching projects</div>
+    </div>
+</div>

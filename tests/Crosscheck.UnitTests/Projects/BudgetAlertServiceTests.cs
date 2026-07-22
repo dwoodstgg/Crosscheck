@@ -50,7 +50,7 @@ public class BudgetAlertServiceTests
         {
             Id = Guid.NewGuid(),
             ProjectId = _project.Id,
-            Type = BudgetType.TimeAndMaterialsCap,
+            Type = ProjectType.Hourly,
             Amount = 1000m,
             AlertThresholds = [50, 75, 90],
         };

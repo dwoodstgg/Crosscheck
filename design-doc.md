@@ -205,7 +205,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | payment_terms_days | int null | Default terms, e.g., 30 for Net-30; project may override |
 | is_active | boolean | |
 
-> One seeded internal client — **The Geospatial Group** — owns internal non-billable projects (leave, admin time). Never invoiced; keeps daily totals reconcilable and feeds utilization reporting.
+> One seeded internal client — **The Geospatial Group** — never invoiced; reserved to own internal non-billable projects (e.g., admin time) if any are ever needed. **Leave is not logged as time at all** (revised 2026-07-22, see decision #3): the timesheet derives it — an untouched company holiday auto-credits 8h of Holiday leave, and Personal leave is the month's expected hours minus hours entered. A holiday falling on a weekend is observed on the nearest weekday (federal rule: Sat → preceding Fri, Sun → following Mon, computed — never stored) and the observed day is what greys out and auto-credits. The seeded `INT-LEAVE` project this client once owned was retired by migration 0018.
 
 > **Billing is per project, with the client as a fallback default.** A client works with multiple departments/contacts (e.g., three concurrent MDWFP projects, three different contacts), so the authoritative billing contact, address, and payment terms live on the **project** (all nullable). A null project field inherits the client's value; the effective value for invoicing resolves **field-by-field as project → client → default** (payment terms default to 30 when neither is set). Client-level fields are pure defaults, not requirements.
 
@@ -217,6 +217,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | name | text | |
 | code | text, unique per client | Short code for invoices/reports, e.g., GEO-014 — `UNIQUE (client_id, code)`; the same code may recur across different clients |
 | status | enum | draft, active, on_hold, **closed**, archived — status changes are always explicit user actions (see §6.5) |
+| project_type | enum | **hourly** (default), **fixed_rate**, **service_contract** — how the project is contracted. Drives what the budget form asks for (decision #22): hourly caps dollars/hours, fixed rate takes the contract amount, a service contract takes a monthly amount over start–end. Editable; the budget row mirrors it at save time |
 | closed_at / closed_by | timestamptz / uuid FK | Set only by the close-out action |
 | project_manager_id | uuid FK → employees | |
 | start_date / end_date | date | |
@@ -246,7 +247,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | name | text | Unique live name per project (case-insensitive, partial index) |
 | sort_order | int | Milestone-labeled projects display it as the number ("5. DMAP – Bug Fixes") |
 | hours | numeric(9,2) null | Explicit flat hour budget; null = effective hours derive from Σ role allocations |
-| amount | numeric(12,2) null | Agreed fixed billing amount. Set = **fixed-price**: the client is billed exactly this, hours are internal budgeting, entries approve without a rate. Null = **T&M**: bills hours × resolved rate as incurred |
+| amount | numeric(12,2) null | Agreed fixed billing amount. Set = **fixed-price**: the client is billed exactly this, hours are internal budgeting, entries approve without a rate. Null = **hourly**: bills hours × resolved rate as incurred |
 | deleted_at | timestamptz null | Soft delete only — entries stay attached, burn shows "(removed)", name frees up |
 
 **project_module_allocations** — per-role hours within a module (mirrors budget_role_allocations)
@@ -278,8 +279,9 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 |---|---|---|
 | id | uuid PK | |
 | project_id | uuid FK unique | |
-| type | enum | fixed_fee, time_and_materials_cap, hours_cap |
-| amount | numeric(12,2) null | Dollar budget |
+| type | enum | hourly, fixed_rate, service_contract — mirrors `projects.project_type` at save time (decision #22) so revision history reads correctly if the project changes type |
+| amount | numeric(12,2) null | Dollar budget. Hourly: an optional cap; fixed rate: the contract amount (required); service contract with a monthly amount: the **contract total** (monthly × months in start–end) |
+| monthly_amount | numeric(12,2) null | Service contracts only — the fixed monthly amount. `amount` stores the total it sizes, so burn/alerts measure the whole engagement and heavy/light months average out |
 | hours | numeric(9,2) null | Hours budget (either/both allowed) |
 | alert_thresholds | int[] | e.g., {50, 75, 90} → notify PM at % burn |
 
@@ -296,9 +298,9 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 
 **budget_revisions** — audit trail of every budget change (who, when, old → new, reason).
 
-> **Fixed-fee milestones are absorbed into `project_modules`** (decision #21, superseding the earlier standalone `milestones` table design): a module with `amount` set IS a fixed-price milestone — employees attach entries to it, hours track the internal budget, and billing charges the agreed amount. The `planned → ready_to_bill → billed` status workflow (and `target_date`, if wanted) will be added to `project_modules` with the invoicing build. Out-of-scope/supplemental work is just another module with `amount` null (T&M), billing hourly at its own override or the project rate — this also resolves the old out-of-scope-rate open question.
+> **Fixed-fee milestones are absorbed into `project_modules`** (decision #21, superseding the earlier standalone `milestones` table design): a module with `amount` set IS a fixed-price milestone — employees attach entries to it, hours track the internal budget, and billing charges the agreed amount. The `planned → ready_to_bill → billed` status workflow (and `target_date`, if wanted) will be added to `project_modules` with the invoicing build. Out-of-scope/supplemental work is just another module with `amount` null (hourly), billing at its own override or the project rate as incurred — this also resolves the old out-of-scope-rate open question.
 
-**company_holidays** — admin-managed holiday calendar (date, name). Drives holiday rows on timesheets and reconciles imported leave.
+**company_holidays** — admin-managed holiday calendar (date, name). Drives holiday rows on timesheets and reconciles imported leave. Weekend holidays are observed on the nearest weekday (`WorkCalendar.ObservedDate`, derived — no observed column). The calendar rolls forward via an audited "copy from previous year" action that recomputes floating federal holidays (MLK, Memorial Day, Thanksgiving, …) by their nth-weekday rules (`HolidayRecurrence`) and copies fixed-date holidays by month/day; existing target-year dates are skipped, so the copied year stays editable.
 
 **tasks** (optional per project — lightweight breakdown for reporting granularity)
 | id, project_id, name, is_billable, status |
@@ -430,7 +432,7 @@ Based on the current company workbook format (e.g., `2026_Don_Woods_timesheet.xl
 5. **Commit** — time entries created in `approved` status (✅ decided: historical data is treated as already approved; configurable to `draft` if review is ever wanted), tagged with `import_id`. Duplicate protection: an entry with the same employee + project + date as an existing entry is flagged, never silently doubled.
 6. **Rollback** — an entire import can be reversed while none of its entries are invoiced.
 
-**Leave handling:** ✅ decided — Holiday/Personal leave rows import into internal non-billable projects (e.g., `INT-LEAVE`) under the internal client **The Geospatial Group**, so daily totals reconcile with the workbook without polluting client billing. Holidays themselves are admin-configurable (`company_holidays`).
+**Leave handling:** ✅ revised 2026-07-22 — leave is **never stored as time entries**. The importer **skips the workbook's Holiday/Personal leave rows**: the system derives the same numbers on the timesheet (an untouched company holiday auto-credits 8h of Holiday leave; Personal leave counts down from expected monthly hours as time is entered), so daily totals still reconcile with the workbook without any leave project. Holidays themselves are admin-configurable (`company_holidays`). (Original decision — importing leave into an internal `INT-LEAVE` project — is retired; migration 0018 removed the project.)
 
 ---
 
@@ -499,7 +501,7 @@ Mobile app (.NET MAUI or React Native — time entry + approvals on the go), des
 
 1. **Backend stack** ✅ .NET 10 (ASP.NET Core), Bootstrap 5.3.x frontend. Data access originally EF Core, revised — see #17.
 2. **Overtime** ✅ None. "Extended Work Week" hours bill at the normal stored (project, role) rate — no multipliers, no overtime flag on entries.
-3. **Leave** ✅ Imports into internal non-billable projects under the internal client **The Geospatial Group**. Holidays are admin-configurable (`company_holidays`).
+3. **Leave** ✅ Originally imported into internal non-billable projects; **revised 2026-07-22**: leave is never logged or imported as time — the timesheet derives it (untouched holidays auto-credit 8h Holiday leave; Personal leave = expected monthly hours − hours entered) and the importer skips workbook leave rows. `INT-LEAVE` retired (migration 0018). Holidays are admin-configurable (`company_holidays`); weekend holidays are observed on the nearest weekday (federal rule, computed), and years roll forward via an audited copy that recomputes floating federal holidays by rule.
 4. **Import approval status** ✅ Committed as `approved`.
 5. **Duplicate month sheets** ✅ The top/first calendar is the employee-entered source of truth; the lower/duplicate client-specific sheets (e.g., "For MDEQ") are produced by the current system and are skipped on import.
 6. **Tax** ✅ Column kept, always 0 in v1.
@@ -517,14 +519,16 @@ Mobile app (.NET MAUI or React Native — time entry + approvals on the go), des
 18. **Billing contact & terms location** ✅ (revised 2026-07-08) Per **project**, not client. Billing contact, address, and payment terms live on the project (all nullable); the client keeps the same fields as **defaults**. Effective value resolves field-by-field project → client → default (terms default 30). Motivated by one client having several concurrent projects with different departmental contacts.
 20. **Per-role hour budgets** ✅ (2026-07-10) A project budget can carry **per-role hour allocations** (e.g. Lead Developer 300h, PM 10h) alongside the overall dollar/hours budget — the two levels are independent, so a fixed-dollar project can still allocate and track hours by role. Allocations are in hours (dollars derive from the rate card); overall hours default to the sum of allocations when not set explicitly. Burn tracking and threshold email alerts apply at **both** levels (overall project and each role vs. its allocation).
 
-21. **Project modules / work-order breakdown** ✅ (2026-07-21) Projects ARE work orders, and work orders come sectioned — MDEQ-style **modules** with per-role hours ("Ag Chem: Dev 240h @ $135…") or NRIS-style numbered **milestones** with flat hours and fixed prices. One mechanism serves both: `project_modules` under a project, each with an hour budget (explicit flat `hours` OR Σ per-role allocations), optional per-role or module-wide rate overrides (resolution: module+role → module-wide → project rate card), and an optional agreed `amount` (set = fixed-price, bills exactly that with hours as internal budget and no rate needed to approve; null = T&M as incurred — how supplemental/out-of-scope hours work). `projects.breakdown_label` picks the display word ("modules"/"milestones" — milestones show their sort number); mechanics are identical. Timesheet shows one row per module; new entries must pick one once a project has any (pre-module entries = read-only "unassigned" bucket). Burn + threshold alerts run overall, per role, and per module. Soft delete only. This absorbs the old standalone fixed-fee `milestones` design and settles the out-of-scope-rate question (formerly open #2).
+21. **Project modules / work-order breakdown** ✅ (2026-07-21) Projects ARE work orders, and work orders come sectioned — MDEQ-style **modules** with per-role hours ("Ag Chem: Dev 240h @ $135…") or NRIS-style numbered **milestones** with flat hours and fixed prices. One mechanism serves both: `project_modules` under a project, each with an hour budget (explicit flat `hours` OR Σ per-role allocations), optional per-role or module-wide rate overrides (resolution: module+role → module-wide → project rate card), and an optional agreed `amount` (set = fixed-price, bills exactly that with hours as internal budget and no rate needed to approve; null = hourly as incurred — how supplemental/out-of-scope hours work). `projects.breakdown_label` picks the display word ("modules"/"milestones" — milestones show their sort number; switched instantly from the Modules/Milestones card, independent of the budget save); mechanics are identical. Timesheet shows one row per module; new entries must pick one once a project has any (pre-module entries = read-only "unassigned" bucket). Burn + threshold alerts run overall, per role, and per module. Soft delete only. This absorbs the old standalone fixed-fee `milestones` design and settles the out-of-scope-rate question (formerly open #2).
+
+22. **Project types & budget simplification** ✅ (2026-07-22) Every project declares how it's contracted — `projects.project_type`: **hourly** (billed for hours worked), **fixed_rate** (agreed price for the work), or **service_contract** (runs over the project start–end dates, billed monthly). This replaces the old budget-level type picker (`fixed_fee` / `time_and_materials_cap` / `hours_cap`) — the budget form now just asks for what the project type needs: hourly → optional dollar and/or hours caps (+ per-role hours); fixed rate → the contract amount (hours optional, internal); service contract → a fixed **monthly amount** (`budgets.monthly_amount`), with the stored `budgets.amount` becoming the contract total (monthly × calendar months in the timeframe, `BudgetService.ContractMonths`) so burn/alerts measure the whole engagement and heavy/light months average out — matching retainers where we're paid the same regardless of hours but still want to see how we're doing. `budgets.type` mirrors the project type at save time (migration 0019 remaps old values: fixed_fee → fixed_rate, the caps → hourly). **"T&M" terminology is retired everywhere** — the UI says "Hourly" (e.g. a module without an agreed amount is badged Hourly, not T&M).
 
 19. **Approval step** ✅ (2026-07-09) **Auto-approve on save.** We're a small shop — a manual approval gate is more overhead than it's worth, so entries approve automatically when saved: billable entries approve once a rate card covers them (otherwise they stay `open` until one is added), non-billable time always approves. The `approved` status and the full approval machinery (ApprovalService, un-approve, `hours_billed` adjustment, the approvals screen) are **retained**, so a manual review step can be turned back on later without rework. Consequence: the "worked 8, bill 6" adjustment is now an explicit Ops/PM un-approve + re-approve rather than a step every entry passes through.
 
 ### Still open
 
 1. **Invoice line grouping:** by role, by task, by module, by person, or configurable per client? *(Asked twice — still unanswered.)*
-2. ~~**Out-of-scope rate on fixed-fee projects**~~ — resolved by decision #21: out-of-scope/supplemental work is a T&M module billing at its own override (per-role or module-wide) or the project rate.
+2. ~~**Out-of-scope rate on fixed-fee projects**~~ — resolved by decision #21: out-of-scope/supplemental work is an hourly module billing at its own override (per-role or module-wide) or the project rate.
 3. **Milestone billing details:** who flips a fixed-price module to `ready_to_bill` (PM or Ops)? Is partial billing ever needed? (Status workflow lands with invoicing.)
 4. **PM self-approval:** on a small team the PM logs time on their own project — can they approve their own entries, or must another PM/Ops do it?
 5. **AWS deployment specifics** (account layout, Terraform vs. CDK): deferred until Phase 1 local development is underway.

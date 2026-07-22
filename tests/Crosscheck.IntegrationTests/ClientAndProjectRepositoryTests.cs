@@ -99,21 +99,25 @@ public sealed class ClientAndProjectRepositoryTests : IAsyncLifetime
     [Fact]
     public async Task GetAll_joins_client_and_manager_names()
     {
+        var projectId = await TestData.InsertProjectAsync(_dataSource);
+
         var all = await _projects.GetAllAsync();
 
-        var leave = Assert.Single(all, s => s.Project.Code == SeedData.LeaveProjectCode);
-        Assert.Equal(SeedData.InternalClientName, leave.ClientName);
-        Assert.Equal("Don Woods", leave.ProjectManagerName);
-        Assert.Equal(ProjectStatus.Active, leave.Project.Status);
+        var summary = Assert.Single(all, s => s.Project.Id == projectId);
+        Assert.Equal(SeedData.InternalClientName, summary.ClientName);
+        Assert.Equal("Don Woods", summary.ProjectManagerName);
+        Assert.Equal(ProjectStatus.Active, summary.Project.Status);
     }
 
     [Fact]
-    public async Task GetByCode_finds_seeded_leave_project()
+    public async Task GetByCode_finds_project_by_code()
     {
-        var project = await _projects.GetByCodeAsync(SeedData.LeaveProjectCode);
+        var projectId = await TestData.InsertProjectAsync(_dataSource, code: "GEO-014");
+
+        var project = await _projects.GetByCodeAsync("GEO-014");
 
         Assert.NotNull(project);
-        Assert.Equal(SeedData.LeaveProjectId, project.Id);
+        Assert.Equal(projectId, project.Id);
     }
 
     [Fact]

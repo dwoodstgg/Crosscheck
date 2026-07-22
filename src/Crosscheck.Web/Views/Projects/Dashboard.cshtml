@@ -27,6 +27,11 @@
         <div class="text-muted">@Model.ClientName</div>
     </div>
     <div class="btn-group">
+        <partial name="_ProjectSwitcher" model="@(new ProjectSwitcherViewModel(
+            ((IReadOnlyList<ProjectSummary>)ViewBag.SwitcherProjects)
+                .Select(p => new ProjectSwitcherItem(p.Project.Id, $"{p.ClientName} - {p.Project.Name}"))
+                .ToList(),
+            Model.Project.Id))" />
         <a class="btn btn-outline-secondary btn-sm" asp-action="Index">All projects</a>
         <a class="btn btn-outline-secondary btn-sm" asp-action="Edit" asp-route-id="@Model.Project.Id">Manage</a>
         <a class="btn btn-outline-secondary btn-sm" asp-controller="Approvals" asp-action="Index" asp-route-projectId="@Model.Project.Id">Approvals</a>
@@ -48,11 +53,13 @@
 
     <div class="card panel-card mb-4 @overClass">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <span>Budget — @(budget.Type switch {
-                BudgetType.FixedFee => "Fixed fee",
-                BudgetType.TimeAndMaterialsCap => "T&M cap",
-                BudgetType.HoursCap => "Hours cap",
-                _ => budget.Type.ToString() })</span>
+            <span>
+                Budget — @Terminology.ProjectTypeLabel(budget.Type)
+                @if (budget.MonthlyAmount is { } monthly)
+                {
+                    <span class="text-muted">(@Money(monthly)/mo)</span>
+                }
+            </span>
             @if (budget.IsOverBudget)
             {
                 <span class="badge text-bg-danger">Over budget</span>

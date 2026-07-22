@@ -18,7 +18,7 @@ public class ProjectModule
     public decimal? Hours { get; set; }
 
     /// <summary>Agreed fixed billing amount. Set = fixed-price: the client is billed exactly
-    /// this and hours are internal budgeting only. Null = T&amp;M: bills hours × resolved rate
+    /// this and hours are internal budgeting only. Null = hourly: bills hours × resolved rate
     /// as incurred.</summary>
     public decimal? Amount { get; set; }
 

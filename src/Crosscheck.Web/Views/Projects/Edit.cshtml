@@ -66,7 +66,8 @@
             <div class="card panel-card mb-4">
                 <div class="card-header">Details</div>
                 <div class="card-body">
-                    <partial name="_Form" model="Model.Form" />
+                    <partial name="_Form" model="Model.Form"
+                             view-data="@(new ViewDataDictionary(ViewData) { ["TypeAndDatesInBudgetCard"] = true })" />
                 </div>
             </div>
 
@@ -104,22 +105,23 @@
                                 <td class="text-end text-nowrap">
                                     @if (rate.HasBilledTime)
                                     {
-                                        <span class="text-muted small" title="Invoiced time is billed at this rate — void the invoice to change it">🔒 billed</span>
+                                        <span class="text-muted small" title="Invoiced time is billed at this rate — void the invoice to change it"><i class="bi bi-lock"></i> billed</span>
                                     }
                                     else
                                     {
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
-                                                data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false">Edit</button>
+                                                data-bs-toggle="collapse" data-bs-target="#@editId" aria-expanded="false"
+                                                title="Edit" aria-label="Edit rate"><i class="bi bi-pencil"></i></button>
                                         @if (rate.HasLoggedTime)
                                         {
-                                            <span class="text-muted small ms-1" title="Time has been logged at this rate — it can't be removed. Correct it instead.">🔒 logged</span>
+                                            <span class="text-muted small ms-1" title="Time has been logged at this rate — it can't be removed. Correct it instead."><i class="bi bi-lock"></i> logged</span>
                                         }
                                         else
                                         {
                                             <form asp-action="DeleteRate" asp-route-id="@project.Id" method="post" class="d-inline"
                                                   onsubmit="return confirm('Remove this rate row? Use this to fix a mistaken entry, not to record a rate change.');">
                                                 <input type="hidden" name="rateCardId" value="@rc.Id" />
-                                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete" aria-label="Delete rate"><i class="bi bi-trash"></i></button>
                                             </form>
                                         }
                                     }
@@ -215,7 +217,8 @@
                                         <form asp-action="ReactivateAssignment" asp-route-id="@project.Id" method="post" class="d-inline">
                                             <input type="hidden" name="assignmentId" value="@a.Id" />
                                             <button type="submit" class="btn btn-sm btn-outline-secondary"
-                                                    title="Puts this person back on the active team">Reactivate</button>
+                                                    title="Reactivate — puts this person back on the active team"
+                                                    aria-label="Reactivate assignment"><i class="bi bi-person-plus"></i></button>
                                         </form>
                                     }
                                     else
@@ -227,7 +230,8 @@
                                               onsubmit="return confirm('@confirmText');">
                                             <input type="hidden" name="assignmentId" value="@a.Id" />
                                             <button type="submit" class="btn btn-sm btn-outline-danger"
-                                                    title="Takes this person off the project">Remove</button>
+                                                    title="Remove — takes this person off the project"
+                                                    aria-label="Remove assignment"><i class="bi bi-person-dash"></i></button>
                                         </form>
                                     }
                                 </td>

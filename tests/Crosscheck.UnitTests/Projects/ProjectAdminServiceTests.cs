@@ -36,7 +36,7 @@ public class ProjectAdminServiceTests
     [Fact]
     public async Task Create_starts_in_draft_and_uppercases_code()
     {
-        var project = await _service.CreateAsync(_client.Id, "Dashboard", "geo-001", _pm.Id, null, null);
+        var project = await _service.CreateAsync(_client.Id, "Dashboard", "geo-001", _pm.Id, ProjectType.Hourly, null, null);
 
         Assert.Equal(ProjectStatus.Draft, project.Status);
         Assert.Equal("GEO-001", project.Code);
@@ -46,10 +46,10 @@ public class ProjectAdminServiceTests
     [Fact]
     public async Task Create_rejects_duplicate_code_for_same_client_case_insensitively()
     {
-        await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, null, null);
+        await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
 
         var ex = await Assert.ThrowsAsync<DomainException>(() =>
-            _service.CreateAsync(_client.Id, "Two", "geo-001", _pm.Id, null, null));
+            _service.CreateAsync(_client.Id, "Two", "geo-001", _pm.Id, ProjectType.Hourly, null, null));
 
         Assert.Contains("already in use", ex.Message);
     }
@@ -60,10 +60,10 @@ public class ProjectAdminServiceTests
         var otherClient = new Client { Id = Guid.NewGuid(), Name = "MDWFP" };
         _clients.Clients.Add(otherClient);
 
-        await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, null, null);
+        await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
 
         // Same code, different client — allowed (codes are unique per client, not globally).
-        var project = await _service.CreateAsync(otherClient.Id, "Two", "GEO-001", _pm.Id, null, null);
+        var project = await _service.CreateAsync(otherClient.Id, "Two", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
 
         Assert.Equal("GEO-001", project.Code);
         Assert.Equal(otherClient.Id, project.ClientId);
@@ -73,14 +73,14 @@ public class ProjectAdminServiceTests
     public async Task Create_rejects_end_before_start()
     {
         await Assert.ThrowsAsync<DomainException>(() => _service.CreateAsync(
-            _client.Id, "Bad dates", "GEO-002", _pm.Id,
+            _client.Id, "Bad dates", "GEO-002", _pm.Id, ProjectType.Hourly,
             new DateOnly(2026, 6, 1), new DateOnly(2026, 5, 1)));
     }
 
     [Fact]
     public async Task Pm_cannot_manage_another_pms_project()
     {
-        var project = await _service.CreateAsync(_client.Id, "Other's", "GEO-003", _otherPm.Id, null, null);
+        var project = await _service.CreateAsync(_client.Id, "Other's", "GEO-003", _otherPm.Id, ProjectType.Hourly, null, null);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             _service.SetStatusAsync(project.Id, ProjectStatus.Active));
@@ -89,7 +89,7 @@ public class ProjectAdminServiceTests
     [Fact]
     public async Task Admin_managing_someone_elses_project_is_flagged_as_override()
     {
-        var project = await _service.CreateAsync(_client.Id, "Other's", "GEO-004", _otherPm.Id, null, null);
+        var project = await _service.CreateAsync(_client.Id, "Other's", "GEO-004", _otherPm.Id, ProjectType.Hourly, null, null);
         _currentUser.Roles.Clear();
         _currentUser.Roles.Add(RoleNames.Admin);
 
@@ -103,7 +103,7 @@ public class ProjectAdminServiceTests
     [Fact]
     public async Task Status_transitions_follow_phase1_rules()
     {
-        var project = await _service.CreateAsync(_client.Id, "Mine", "GEO-005", _pm.Id, null, null);
+        var project = await _service.CreateAsync(_client.Id, "Mine", "GEO-005", _pm.Id, ProjectType.Hourly, null, null);
 
         await _service.SetStatusAsync(project.Id, ProjectStatus.Active);
         Assert.Equal(ProjectStatus.Active, project.Status);
@@ -115,7 +115,7 @@ public class ProjectAdminServiceTests
         Assert.Equal(ProjectStatus.Active, project.Status);
 
         // No skipping draft→on_hold, and close-out is Phase 2.
-        var draft = await _service.CreateAsync(_client.Id, "Draft", "GEO-006", _pm.Id, null, null);
+        var draft = await _service.CreateAsync(_client.Id, "Draft", "GEO-006", _pm.Id, ProjectType.Hourly, null, null);
         await Assert.ThrowsAsync<DomainException>(() => _service.SetStatusAsync(draft.Id, ProjectStatus.OnHold));
         await Assert.ThrowsAsync<DomainException>(() => _service.SetStatusAsync(project.Id, ProjectStatus.Closed));
     }
@@ -125,12 +125,12 @@ public class ProjectAdminServiceTests
     {
         _client.IsActive = false;
         await Assert.ThrowsAsync<DomainException>(() =>
-            _service.CreateAsync(_client.Id, "X", "GEO-007", _pm.Id, null, null));
+            _service.CreateAsync(_client.Id, "X", "GEO-007", _pm.Id, ProjectType.Hourly, null, null));
 
         _client.IsActive = true;
         _pm.IsActive = false;
         await Assert.ThrowsAsync<DomainException>(() =>
-            _service.CreateAsync(_client.Id, "X", "GEO-007", _pm.Id, null, null));
+            _service.CreateAsync(_client.Id, "X", "GEO-007", _pm.Id, ProjectType.Hourly, null, null));
     }
 
     private Employee AddEmployee(string email)
