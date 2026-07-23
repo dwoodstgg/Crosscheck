@@ -44,7 +44,7 @@ public class ProjectAdminServiceTests
     }
 
     [Fact]
-    public async Task Create_rejects_duplicate_code_for_same_client_case_insensitively()
+    public async Task Create_rejects_duplicate_code_case_insensitively()
     {
         await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
 
@@ -55,18 +55,32 @@ public class ProjectAdminServiceTests
     }
 
     [Fact]
-    public async Task Create_allows_same_code_under_a_different_client()
+    public async Task Create_rejects_same_code_under_a_different_client()
     {
         var otherClient = new Client { Id = Guid.NewGuid(), Name = "MDWFP" };
         _clients.Clients.Add(otherClient);
 
         await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
 
-        // Same code, different client — allowed (codes are unique per client, not globally).
-        var project = await _service.CreateAsync(otherClient.Id, "Two", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
+        // Codes are globally unique — the timesheet import matches by code alone.
+        var ex = await Assert.ThrowsAsync<DomainException>(() =>
+            _service.CreateAsync(otherClient.Id, "Two", "GEO-001", _pm.Id, ProjectType.Hourly, null, null));
 
-        Assert.Equal("GEO-001", project.Code);
-        Assert.Equal(otherClient.Id, project.ClientId);
+        Assert.Contains("already in use", ex.Message);
+    }
+
+    [Fact]
+    public async Task Update_allows_keeping_own_code_and_rejects_taking_anothers()
+    {
+        var first = await _service.CreateAsync(_client.Id, "One", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
+        await _service.CreateAsync(_client.Id, "Two", "GEO-002", _pm.Id, ProjectType.Hourly, null, null);
+
+        // Re-saving with its own code is fine.
+        await _service.UpdateAsync(first.Id, _client.Id, "One renamed", "GEO-001", _pm.Id, ProjectType.Hourly, null, null);
+        Assert.Equal("One renamed", first.Name);
+
+        await Assert.ThrowsAsync<DomainException>(() => _service.UpdateAsync(
+            first.Id, _client.Id, "One", "GEO-002", _pm.Id, ProjectType.Hourly, null, null));
     }
 
     [Fact]

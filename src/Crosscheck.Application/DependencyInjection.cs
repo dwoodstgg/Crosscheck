@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Crosscheck.Application.Clients;
 using Crosscheck.Application.Employees;
 using Crosscheck.Application.Holidays;
+using Crosscheck.Application.Imports;
 using Crosscheck.Application.Preferences;
 using Crosscheck.Application.Projects;
 using Crosscheck.Application.Roles;
@@ -31,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<TimesheetPeriodService>();
         services.AddScoped<HolidayService>();
         services.AddScoped<PreferenceService>();
+        services.AddScoped<TimesheetImportService>();
         return services;
     }
 }

@@ -215,7 +215,7 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 | id | uuid PK | |
 | client_id | uuid FK | |
 | name | text | |
-| code | text, unique per client | Short code for invoices/reports, e.g., GEO-014 — `UNIQUE (client_id, code)`; the same code may recur across different clients |
+| code | text, unique | Short code for invoices/reports, e.g., GEO-014 — globally `UNIQUE (code)` (revised 2026-07-23, migration 0022; briefly per-client via 0014): the Excel timesheet import matches workbook job labels to projects by code alone, so a code must identify exactly one project |
 | status | enum | draft, active, on_hold, **closed**, archived — status changes are always explicit user actions (see §6.5) |
 | project_type | enum | **hourly** (default), **fixed_rate**, **service_contract**, **internal** — how the project is contracted. Drives what the budget form asks for (decision #22): hourly caps dollars/hours, fixed rate takes the contract amount, a service contract takes its total contract amount over start–end (monthly breakdown derived at reporting time), internal takes nothing — never billed, no budget, entries non-billable. Editable; the budget row mirrors it at save time |
 | closed_at / closed_by | timestamptz / uuid FK | Set only by the close-out action |
@@ -346,21 +346,22 @@ Employee *──* Role   (via employee_roles — company roles, permissions)
 
 **audit_log** — append-only record of sensitive mutations (rate changes, budget changes, invoice issuance, role assignments, project close-outs, imports).
 
-**timesheet_imports** — one row per uploaded workbook
+**timesheet_imports** — one row per uploaded workbook (migration 0023, revised 2026-07-23 to the built shape)
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| employee_id | uuid FK | Employee the timesheet belongs to (parsed from workbook, confirmed by importer) |
-| uploaded_by | uuid FK | |
-| source_filename | text | e.g., 2026_Don_Woods_timesheet.xlsx |
-| s3_key | text | Original file retained for audit |
-| year | int | |
-| status | enum | uploaded, parsed, mapped, previewed, committed, failed |
-| summary | jsonb | Counts, warnings, skipped rows |
+| employee_id | uuid FK | Employee the timesheet belongs to — resolved by tenant email at upload (record created if missing) |
+| file_name | text | e.g., 2026 Don Woods timesheet.xlsx (S3 retention of the original arrives with the AWS build) |
+| year | int | From Yearly Info |
+| status | enum | pending → committed → rolled_back; a pending import can be discarded (hard-delete, no entries exist yet) |
+| parse_warnings | text | Parser oddities shown on review (skipped artifacts, calendar/DESC total mismatches); newline-separated |
+| uploaded_by/_at, committed_by/_at, rolled_back_by/_at | | |
 
-**timesheet_import_mappings** — remembers "spreadsheet project label → system project" (e.g., `RICS Dashboard` → project GEO-007) so subsequent imports auto-map.
+**timesheet_import_rows** — staging for the line-item review: one parsed workbook line (sheet/row provenance, project label, date, hours, description) plus the importer's edits (resolved `project_id`, `billing_role_id`, `included` flag). Everything the commit uses is editable while the import is pending; rows are kept after commit as the record of what was reviewed and deleted with a discarded import (cascade).
 
-Imported time entries carry `import_id` (nullable FK on time_entries) so any import can be reviewed or rolled back before entries are approved.
+**timesheet_import_mappings** — remembers "spreadsheet project label → system project" (e.g., `Burn Plan Work` → project NRIS-2026) so subsequent imports auto-map. Written at commit for every label the importer mapped by hand; matched case-insensitively (unique on `lower(label)`); re-mapping a label replaces its old target.
+
+Imported time entries carry `import_id` (nullable FK on time_entries) so any import can be reviewed and rolled back until any of its entries is invoiced.
 
 ### 5.3 Key Integrity Rules
 1. A time entry cannot be created unless the employee has an active (not-removed) assignment on the project.
@@ -420,16 +421,16 @@ Based on the current company workbook format (e.g., `2026_Don_Woods_timesheet.xl
 **Source format understood as:**
 - **Yearly Info** sheet: employee name, year, holiday calendar, and the master job/project list that feeds every monthly sheet.
 - **Two sheets per month.** The **calendar sheet** (`JAN`…`DEC`) is where hours are entered: a matrix of project rows × day-of-month columns (quarter-hour granularity), with per-project monthly totals, daily totals, leave rows (Holiday, Personal), Extended Work Week, and weekly totals. The paired **description sheet** (`JAN-DESC`…`DEC-DESC`) receives those hours **rolled up** per project per day, and is where the free-text description of the work is typed.
-- **Import roles:** hours are authoritative on the calendar sheet; descriptions are authoritative on the `-DESC` sheet; the parser joins them by (project, date) and warns when the rolled-up hours on `-DESC` disagree with the calendar.
-- Workbooks may contain an extra duplicate calendar per month (the sample has both `'JAN '` and `'JAN'`, the latter holding a client-specific "MONTHLY TIME RECORD For MDEQ" block). **The top/first calendar is the employee-entered source of truth; extra client-specific calendars are derived by the current system and are skipped on import.**
+- **Import source** (✅ revised 2026-07-23, built): the **`-DESC` sheets are the import source** — each carries project label (column A), date (C), hours (D), and description (E) in one place, already rolled up from the calendar. The calendar sheet is used only to **cross-check** per-project monthly totals (top block only, stopping at its "Total" row so client-specific duplicate blocks are ignored); a mismatch is a review warning, never a failure, and the `-DESC` hours are what import.
+- **Hidden sheets are skipped entirely** (newer workbooks hide stale calendars, e.g. a hidden `'JAN '` with leftover data); extra client-specific calendars (the "For MDEQ" block) never contribute because only `-DESC` sheets are read.
 
-**Import pipeline:**
-1. **Upload** — Ops/Admin (or PM for their own projects) uploads the .xlsx; original stored in S3.
-2. **Parse** — server-side parse with **ClosedXML**. Reads employee + year from Yearly Info, iterates each month's calendar sheet for (project label, date, hours), then joins each cell to its description from the matching `-DESC` sheet by (project, date), warning on hour mismatches between the two. Parser is defensive: skips `#REF!`/`#VALUE!` artifacts, zero-hour rows, blank project slots, and duplicate/auxiliary calendar sheets (dedupes by employee + date + project).
-3. **Map** — spreadsheet project labels are matched to system projects: saved mappings first, then fuzzy suggestion, then manual pick (or "create new project") in a mapping UI. Employee matched by **tenant email address**: the importer is prompted for the person's email; if no employee record exists one is created (email-only, `entra_oid` null) and linked to Entra automatically on that person's first sign-in. Works for departed staff who will never sign in. Mappings are remembered for future imports.
-4. **Preview** — importer sees a per-month/per-project summary (hours, entry counts, descriptions attached, warnings: days exceeding 24h, entries on a closed project, overlap with already-imported data) before committing.
-5. **Commit** — time entries created in `approved` status (✅ decided: historical data is treated as already approved; configurable to `draft` if review is ever wanted), tagged with `import_id`. Duplicate protection: an entry with the same employee + project + date as an existing entry is flagged, never silently doubled.
-6. **Rollback** — an entire import can be reversed while none of its entries are invoiced.
+**Import pipeline (✅ built 2026-07-23 — decisions inline):**
+1. **Upload** — Ops/Admin uploads the .xlsx and supplies the person's **tenant email**; if no employee record exists one is created (email-only, `entra_oid` null, display name from the workbook, audited) and linked to Entra automatically on that person's first sign-in. Works for departed staff who will never sign in. (S3 retention of the original arrives with the AWS build.)
+2. **Parse** — server-side with **ClosedXML** (`TimesheetWorkbookParser`), from cached formula values (never re-evaluating). Reads employee + year from Yearly Info; iterates every visible `-DESC` sheet. Defensive: skips `#REF!`/`#VALUE!` artifacts, zero-hour rows, and blank project slots; dedupes repeated (project, date) rows keeping the first; keeps year-straddle entries (Dec 29–31 on the JAN sheet) with a warning. Parse warnings are stored on the import and shown on review.
+3. **Map** — labels are matched to projects by **code first** (codes are globally unique for exactly this — migration 0022), then **saved mappings**. Unmatched rows get a project dropdown on the review page; every hand-mapped label is **remembered at commit** (✅ decided: map inline, remember it). Billing role defaults to the assignment's default billing role, else the employee's only billable company role (✅ decided), editable per row.
+4. **Review** — the parse lands in `timesheet_import_rows` staging, and the review page lists **every line item, editable** (project, date, hours, billing role, description, include/exclude) grouped by month. Flags: **possible duplicates** (an existing entry on the same employee + project + date — these start **excluded**; also in-file collisions on the same cell), unmapped projects, missing billing role/description, closed-project notes (informational — historical import is allowed). Bulk "exclude all duplicates" plus per-row save.
+5. **Commit** — Ops/Admin action, blocked while any included row still has a problem or would collide with an existing entry (nothing is silently doubled — the `(employee, project, module, date)` uniqueness backs this up in the DB). Entries are created in `approved` status (✅ historical data is treated as already approved), `module_id` null (✅ decided: entries on modular projects land in the read-only "unassigned" bucket), tagged with `import_id`, billability seeded from project/client as usual. Missing assignments are **auto-created** (✅ decided; audited via the commit event — an ended assignment stays ended so the person can't log new time). Assignments, entries, and mappings write in **one transaction**; import bypasses the open-window and active-assignment gates that govern live entry (it's Ops-run historical data). Budget alerts re-evaluate per affected project.
+6. **Rollback** — an entire committed import can be reversed (entries deleted, audited) while none of its entries are invoiced; a pending import can be discarded outright.
 
 **Leave handling:** ✅ revised 2026-07-22 — leave is **never stored as time entries**. The importer **skips the workbook's Holiday/Personal leave rows**: the system derives the same numbers on the timesheet (an untouched company holiday auto-credits 8h of Holiday leave; Personal leave counts down from expected monthly hours as time is entered), so daily totals still reconcile with the workbook without any leave project. Holidays themselves are admin-configurable (`company_holidays`). (Original decision — importing leave into an internal `INT-LEAVE` project — is retired; migration 0018 removed the project.)
 

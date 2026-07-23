@@ -25,9 +25,13 @@ public record RoleBurn(string RoleName, decimal HoursWorked, decimal HoursBilled
 
 public record PersonBurn(string EmployeeName, decimal HoursWorked, decimal HoursBilled, decimal Value);
 
-public record RecentEntry(
-    DateOnly Date, string EmployeeName, string RoleName,
-    decimal HoursWorked, decimal HoursBilled, TimeEntryStatus Status, bool IsBillable);
+/// <summary>One recorded time entry on the dashboard's full entry list — carries the ids
+/// the inline editor posts back (entry, billing role) alongside the display fields.
+/// Invoiced entries render read-only (design rule 5).</summary>
+public record RecordedEntry(
+    Guid EntryId, DateOnly Date, string EmployeeName, Guid BillingRoleId, string RoleName,
+    string? ModuleName, decimal HoursWorked, decimal HoursBilled, string? Notes,
+    TimeEntryStatus Status, bool IsBillable);
 
 /// <summary>Hours budget vs. burn for one billing role (e.g. Lead Developer 300h). "Spent" is
 /// billed hours on approved/invoiced entries; "pending" is worked hours still open.</summary>
@@ -113,7 +117,13 @@ public class ProjectDashboard
 
     public required IReadOnlyList<PersonBurn> ByPerson { get; init; }
     public required IReadOnlyList<AssignmentSummary> Team { get; init; }
-    public required IReadOnlyList<RecentEntry> Recent { get; init; }
+
+    /// <summary>Every recorded entry on the project, newest first — the dashboard's
+    /// inline-editable entry list.</summary>
+    public required IReadOnlyList<RecordedEntry> Entries { get; init; }
+
+    /// <summary>Billable roles for the entry editor's billing-role dropdown.</summary>
+    public required IReadOnlyList<Role> BillableRoles { get; init; }
 
     /// <summary>The project's budget vs. burn, or null when no budget has been set.</summary>
     public BudgetStatus? Budget { get; init; }
@@ -134,7 +144,8 @@ public class ProjectDashboardService(
     IAssignmentRepository assignments,
     ITimeEntryRepository entries,
     IBudgetRepository budgets,
-    IModuleRepository modules)
+    IModuleRepository modules,
+    Roles.IRoleRepository roles)
 {
     public async Task<ProjectDashboard?> GetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -172,10 +183,11 @@ public class ProjectDashboardService(
             .OrderByDescending(p => p.HoursWorked)
             .ToList();
 
-        var recent = rows
-            .OrderByDescending(r => r.EntryDate)
-            .Take(10)
-            .Select(r => new RecentEntry(r.EntryDate, r.EmployeeName, r.RoleName, r.HoursWorked, r.HoursBilled, r.Status, r.IsBillable))
+        var recorded = rows
+            .OrderByDescending(r => r.EntryDate).ThenBy(r => r.EmployeeName)
+            .Select(r => new RecordedEntry(
+                r.EntryId, r.EntryDate, r.EmployeeName, r.BillingRoleId, r.RoleName,
+                r.ModuleName, r.HoursWorked, r.HoursBilled, r.Notes, r.Status, r.IsBillable))
             .ToList();
 
         var liveModules = await modules.GetForProjectAsync(projectId, includeDeleted: false, cancellationToken);
@@ -192,7 +204,8 @@ public class ProjectDashboardService(
             ByModule = BudgetBurn.ComputeModules(liveModules, rows),
             ByPerson = byPerson,
             Team = team,
-            Recent = recent,
+            Entries = recorded,
+            BillableRoles = (await roles.GetAllAsync(cancellationToken)).Where(r => r.IsBillable).ToList(),
             Budget = budgetStatus,
             HasRateGaps = rows.Any(r => r is { IsBillable: true, ResolvedRate: null }),
         };

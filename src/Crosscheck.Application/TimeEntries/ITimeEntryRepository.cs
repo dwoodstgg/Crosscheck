@@ -25,6 +25,7 @@ public record BurnRow(
     bool ModuleDeleted,
     decimal HoursWorked,
     decimal HoursBilled,
+    string? Notes,
     decimal? ResolvedRate);
 
 public interface ITimeEntryRepository

@@ -202,10 +202,6 @@ public sealed class FakeProjectRepository : IProjectRepository
         Task.FromResult(Projects.FirstOrDefault(p =>
             string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase)));
 
-    public Task<Project?> GetByClientAndCodeAsync(Guid clientId, string code, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Projects.FirstOrDefault(p =>
-            p.ClientId == clientId && string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase)));
-
     public Task AddAsync(Project project, CancellationToken cancellationToken = default)
     {
         Projects.Add(project);
@@ -624,7 +620,7 @@ public sealed class FakeTimeEntryRepository : ITimeEntryRepository
                 e.ModuleId,
                 e.ModuleId is { } mid ? ModuleNames.GetValueOrDefault(mid, "module") : null,
                 e.ModuleId is { } mdel && DeletedModules.Contains(mdel),
-                e.HoursWorked, e.HoursBilled,
+                e.HoursWorked, e.HoursBilled, e.Notes,
                 RatesByRole.TryGetValue(e.BillingRoleId, out var rate) ? rate : null))
             .ToList());
 

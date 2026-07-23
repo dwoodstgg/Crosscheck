@@ -34,7 +34,7 @@ public class BudgetBurnTests
         new(Guid.NewGuid(), new DateOnly(2026, 8, 15), status, IsBillable: true,
             Guid.NewGuid(), "Someone", roleId, "Role",
             moduleId, moduleName ?? (moduleId is null ? null : "M"), moduleDeleted,
-            hours, hours, rate);
+            hours, hours, "work", rate);
 
     [Fact]
     public void Mdeq_shape_rolls_project_hours_and_roles_up_from_modules()

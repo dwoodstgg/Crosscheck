@@ -1,0 +1,115 @@
+@using Crosscheck.Domain.Enums
+@model ImportsIndexViewModel
+@{
+    ViewData["Title"] = "Timesheet Imports";
+}
+
+<h1 class="h3 mb-1">Timesheet Imports</h1>
+<p class="text-muted">
+    Upload a yearly Excel timesheet workbook, review every parsed line (duplicates are flagged,
+    unknown project labels are mapped by hand and remembered), then commit the entries.
+    A committed import can be rolled back until any of its entries is invoiced.
+</p>
+
+@if (TempData["Notice"] is string notice)
+{
+    <div class="alert alert-success">@notice</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger">@err</div>
+}
+
+<form asp-action="Upload" method="post" enctype="multipart/form-data" class="card panel-card mb-4">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label small text-muted mb-1">Workbook (.xlsx)</label>
+                <input type="file" name="workbook" class="form-control" accept=".xlsx" required />
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-muted mb-1">Employee tenant email — a new employee record is created if none exists</label>
+                <input type="email" name="email" class="form-control" placeholder="person@thegeospatialgroup.com" required />
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-upload me-1"></i>Upload</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+@if (Model.Imports.Count == 0)
+{
+    <div class="alert alert-info">No imports yet — upload a workbook to get started.</div>
+    return;
+}
+
+<div class="card panel-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Uploaded</th>
+                    <th>Workbook</th>
+                    <th>Employee</th>
+                    <th>Year</th>
+                    <th class="text-end">Rows</th>
+                    <th class="text-end">Hours</th>
+                    <th>Status</th>
+                    <th>By</th>
+                    <th class="text-end pe-3">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model.Imports)
+                {
+                    var import = item.Import;
+                    <tr>
+                        <td class="ps-3">@import.UploadedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                        <td class="text-break">@import.FileName</td>
+                        <td>@item.EmployeeName</td>
+                        <td>@import.Year</td>
+                        <td class="text-end">@item.RowCount</td>
+                        <td class="text-end">@item.TotalHours.ToString("0.##")</td>
+                        <td>
+                            @switch (import.Status)
+                            {
+                                case TimesheetImportStatus.Pending:
+                                    <span class="badge text-bg-warning-subtle text-warning-emphasis border border-warning-subtle">pending review</span>
+                                    break;
+                                case TimesheetImportStatus.Committed:
+                                    <span class="badge text-bg-success-subtle text-success-emphasis border border-success-subtle">committed</span>
+                                    break;
+                                case TimesheetImportStatus.RolledBack:
+                                    <span class="badge text-bg-secondary">rolled back</span>
+                                    break;
+                            }
+                        </td>
+                        <td>@item.UploadedByName</td>
+                        <td class="text-end pe-3">
+                            <a asp-action="Review" asp-route-id="@import.Id" class="btn btn-sm btn-outline-primary">
+                                @(import.Status == TimesheetImportStatus.Pending ? "Review" : "View")
+                            </a>
+                            @if (import.Status == TimesheetImportStatus.Pending)
+                            {
+                                <form asp-action="Discard" method="post" class="d-inline"
+                                      onsubmit="return confirm('Discard this import and its parsed rows?');">
+                                    <input type="hidden" name="importId" value="@import.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Discard</button>
+                                </form>
+                            }
+                            else if (import.Status == TimesheetImportStatus.Committed)
+                            {
+                                <form asp-action="Rollback" method="post" class="d-inline"
+                                      onsubmit="return confirm('Roll back this import? All of its time entries will be removed.');">
+                                    <input type="hidden" name="importId" value="@import.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Roll back</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

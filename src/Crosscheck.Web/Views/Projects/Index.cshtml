@@ -33,6 +33,7 @@
 <table class="table table-hover align-middle">
     <thead>
         <tr>
+            <th></th>
             <th>Code</th>
             <th>Name</th>
             <th>Client</th>
@@ -47,6 +48,9 @@
         {
             var p = item.Project;
             <tr>
+                <td class="text-nowrap" style="width:1%">
+                    <a class="btn btn-sm btn-primary" asp-action="Dashboard" asp-route-id="@p.Id" title="Dashboard" aria-label="Dashboard"><i class="bi bi-speedometer2"></i></a>
+                </td>
                 <td><code>@p.Code</code></td>
                 <td>@p.Name</td>
                 <td>@item.ClientName</td>
@@ -60,7 +64,6 @@
                 </td>
                 <td><span class="badge @StatusBadge(p.Status)">@StatusLabel(p.Status)</span></td>
                 <td class="text-end text-nowrap">
-                    <a class="btn btn-sm btn-outline-secondary" asp-action="Dashboard" asp-route-id="@p.Id" title="Dashboard" aria-label="Dashboard"><i class="bi bi-speedometer2"></i></a>
                     <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@p.Id" title="Manage" aria-label="Manage"><i class="bi bi-gear"></i></a>
                     @if (!item.HasTimeEntries)
                     {

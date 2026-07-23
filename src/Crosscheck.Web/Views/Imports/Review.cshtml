@@ -1,0 +1,302 @@
+@using Crosscheck.Domain.Enums
+@model ImportReviewViewModel
+@{
+    var review = Model.Review;
+    var import = review.Import;
+    var pending = import.Status == TimesheetImportStatus.Pending;
+    ViewData["Title"] = $"Import — {import.FileName}";
+    ViewData["ContainerClass"] = "container-fluid px-4";
+    string Fmt(decimal h) => h.ToString("0.##");
+    var parseWarnings = (import.ParseWarnings ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+}
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-1">
+    <h1 class="h3 mb-0">Review Import</h1>
+    @switch (import.Status)
+    {
+        case TimesheetImportStatus.Pending:
+            <span class="badge text-bg-warning-subtle text-warning-emphasis border border-warning-subtle">pending review</span>
+            break;
+        case TimesheetImportStatus.Committed:
+            <span class="badge text-bg-success-subtle text-success-emphasis border border-success-subtle">committed</span>
+            break;
+        case TimesheetImportStatus.RolledBack:
+            <span class="badge text-bg-secondary">rolled back</span>
+            break;
+    }
+</div>
+<p class="text-muted">
+    <span class="text-break">@import.FileName</span> · @review.EmployeeName (@review.EmployeeEmail) · @import.Year
+    · <a asp-action="Index">all imports</a>
+</p>
+
+@if (TempData["Notice"] is string notice)
+{
+    <div class="alert alert-success">@notice</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger">@err</div>
+}
+
+@if (parseWarnings.Length > 0)
+{
+    <div class="alert alert-warning py-2">
+        <a class="alert-link" data-bs-toggle="collapse" href="#parse-warnings" role="button">
+            @parseWarnings.Length parser note@(parseWarnings.Length == 1 ? "" : "s") from this workbook
+        </a>
+        <ul id="parse-warnings" class="collapse mb-0 mt-2 small">
+            @foreach (var warning in parseWarnings)
+            {
+                <li>@warning</li>
+            }
+        </ul>
+    </div>
+}
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <span class="badge text-bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+        @review.IncludedCount of @review.Rows.Count rows included · @Fmt(review.IncludedHours) h
+    </span>
+    @if (review.DuplicateCount > 0)
+    {
+        <span class="badge text-bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+            @review.DuplicateCount possible duplicate@(review.DuplicateCount == 1 ? "" : "s")
+        </span>
+    }
+    @if (pending && review.BlockedCount > 0)
+    {
+        <span class="badge text-bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+            @review.BlockedCount row@(review.BlockedCount == 1 ? "" : "s") need attention before commit
+        </span>
+    }
+    @if (pending)
+    {
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="attention-only" />
+            <label class="form-check-label small" for="attention-only">Only rows needing attention</label>
+        </div>
+    }
+    <span class="ms-auto d-flex gap-2">
+        @if (pending)
+        {
+            @if (review.DuplicateCount > 0)
+            {
+                <form asp-action="ExcludeDuplicates" method="post" class="m-0">
+                    <input type="hidden" name="importId" value="@import.Id" />
+                    <button type="submit" class="btn btn-outline-danger">Exclude all duplicates</button>
+                </form>
+            }
+            <form asp-action="Commit" method="post" class="m-0"
+                  onsubmit="return confirm('Commit @review.IncludedCount entries (@Fmt(review.IncludedHours) hours) as approved time for @review.EmployeeName?');">
+                <input type="hidden" name="importId" value="@import.Id" />
+                <button type="submit" class="btn btn-success" @(review.IncludedCount == 0 ? "disabled" : "")>
+                    <i class="bi bi-check-lg me-1"></i>Commit @review.IncludedCount entr@(review.IncludedCount == 1 ? "y" : "ies")
+                </button>
+            </form>
+            <form asp-action="Discard" method="post" class="m-0"
+                  onsubmit="return confirm('Discard this import and its parsed rows?');">
+                <input type="hidden" name="importId" value="@import.Id" />
+                <button type="submit" class="btn btn-outline-danger">Discard</button>
+            </form>
+        }
+        else if (import.Status == TimesheetImportStatus.Committed)
+        {
+            <form asp-action="Rollback" method="post" class="m-0"
+                  onsubmit="return confirm('Roll back this import? All of its time entries will be removed.');">
+                <input type="hidden" name="importId" value="@import.Id" />
+                <button type="submit" class="btn btn-outline-danger">Roll back import</button>
+            </form>
+        }
+    </span>
+</div>
+
+@if (pending && review.BlockedCount > 0)
+{
+    <div class="alert alert-warning py-2">
+        Rows marked <span class="badge text-bg-warning">needs attention</span> block the commit —
+        map their project, pick a billing role, or add a description (or exclude them).
+    </div>
+}
+
+@foreach (var month in review.Rows.GroupBy(r => new DateOnly(r.Row.EntryDate.Year, r.Row.EntryDate.Month, 1)).OrderBy(g => g.Key))
+{
+    var monthIncluded = month.Where(r => r.Row.Included).ToList();
+    <div class="card panel-card mb-4 month-card">
+        <div class="card-header bg-white d-flex flex-wrap align-items-center gap-2">
+            <strong>@month.Key.ToString("MMMM yyyy")</strong>
+            <span class="text-muted small">@monthIncluded.Count of @month.Count() rows · @Fmt(monthIncluded.Sum(r => r.Row.Hours)) h included</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3" title="Include this row in the commit">Inc.</th>
+                        <th>Date</th>
+                        <th style="min-width:16rem">Project</th>
+                        <th class="text-end">Hours</th>
+                        <th style="min-width:11rem">Billing role</th>
+                        <th style="min-width:20rem">Description</th>
+                        <th>Flags</th>
+                        @if (pending)
+                        {
+                            <th class="text-end pe-3">Save</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in month)
+                    {
+                        var row = item.Row;
+                        var formId = $"f-{row.Id}";
+                        var needsAttention = pending && row.Included
+                            && (item.Problems.Count > 0 || item.DuplicateOfExisting || item.DuplicateInFile);
+                        <tr id="row-@row.Id" class="@(row.Included ? "" : "opacity-50")"
+                            data-needs-attention="@(needsAttention ? "true" : "false")">
+                            <td class="ps-3">
+                                @if (pending)
+                                {
+                                    <form id="@formId" asp-action="UpdateRow" method="post" class="m-0">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="rowId" value="@row.Id" />
+                                        <input type="hidden" name="importId" value="@import.Id" />
+                                    </form>
+                                    <input type="checkbox" name="included" value="true" form="@formId"
+                                           class="form-check-input" @(row.Included ? "checked" : "") />
+                                }
+                                else if (row.Included)
+                                {
+                                    <i class="bi bi-check-lg text-success"></i>
+                                }
+                            </td>
+                            <td>
+                                @if (pending)
+                                {
+                                    <input type="date" name="entryDate" value="@row.EntryDate.ToString("yyyy-MM-dd")"
+                                           form="@formId" class="form-control form-control-sm" style="width:9.5rem" />
+                                }
+                                else
+                                {
+                                    @row.EntryDate.ToString("ddd MMM d")
+                                }
+                            </td>
+                            <td>
+                                @if (pending)
+                                {
+                                    <select name="projectId" form="@formId"
+                                            class="form-select form-select-sm @(row.ProjectId is null ? "border-warning" : "")">
+                                        <option value="">— map "@row.ProjectLabel" —</option>
+                                        @foreach (var option in Model.ProjectOptions)
+                                        {
+                                            <option value="@option.Value" selected="@(option.Value == row.ProjectId?.ToString())">@option.Text</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    @(Model.ProjectOptions.FirstOrDefault(o => o.Value == row.ProjectId?.ToString())?.Text ?? row.ProjectLabel)
+                                }
+                                <div class="form-text mt-0" title="Workbook source: @row.SheetName row @row.SheetRow">
+                                    "@row.ProjectLabel" · @row.SheetName:@row.SheetRow
+                                </div>
+                            </td>
+                            <td class="text-end">
+                                @if (pending)
+                                {
+                                    <input type="number" name="hours" value="@Fmt(row.Hours)" min="0.25" max="24" step="0.25"
+                                           form="@formId" class="form-control form-control-sm text-end ms-auto" style="width:5.5rem" />
+                                }
+                                else
+                                {
+                                    @Fmt(row.Hours)
+                                }
+                            </td>
+                            <td>
+                                @if (pending)
+                                {
+                                    <select name="billingRoleId" form="@formId"
+                                            class="form-select form-select-sm @(row.BillingRoleId is null ? "border-warning" : "")">
+                                        <option value="">— billing role —</option>
+                                        @foreach (var option in Model.RoleOptions)
+                                        {
+                                            <option value="@option.Value" selected="@(option.Value == row.BillingRoleId?.ToString())">@option.Text</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    @(Model.RoleOptions.FirstOrDefault(o => o.Value == row.BillingRoleId?.ToString())?.Text ?? "—")
+                                }
+                            </td>
+                            <td>
+                                @if (pending)
+                                {
+                                    <input type="text" name="description" value="@row.Description"
+                                           form="@formId" class="form-control form-control-sm" />
+                                }
+                                else
+                                {
+                                    <span class="small">@row.Description</span>
+                                }
+                            </td>
+                            <td>
+                                @if (item.DuplicateOfExisting)
+                                {
+                                    <span class="badge text-bg-danger" title="@review.EmployeeName already has a time entry for this project and day">duplicate</span>
+                                }
+                                @if (item.DuplicateInFile)
+                                {
+                                    <span class="badge text-bg-danger" title="An earlier included row already covers this project and day">duplicate in file</span>
+                                }
+                                @if (pending && row.Included && item.Problems.Count > 0)
+                                {
+                                    <span class="badge text-bg-warning" title="@string.Join(" ", item.Problems)">needs attention</span>
+                                }
+                                @foreach (var warning in item.Warnings)
+                                {
+                                    <span class="badge text-bg-light text-muted border" title="@warning"><i class="bi bi-info-circle"></i></span>
+                                }
+                            </td>
+                            @if (pending)
+                            {
+                                <td class="text-end pe-3">
+                                    <button type="submit" form="@formId" class="btn btn-sm btn-outline-primary"
+                                            title="Save this row's changes" aria-label="Save row">
+                                        <i class="bi bi-save"></i>
+                                    </button>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@section Scripts {
+    <script>
+        (function () {
+            const toggle = document.getElementById("attention-only");
+            if (!toggle) return;
+
+            // Saving a row reloads the page, so the filter state rides in sessionStorage.
+            const storageKey = "import-attention-only-@import.Id";
+
+            function apply() {
+                const on = toggle.checked;
+                document.querySelectorAll("tr[data-needs-attention]").forEach(tr =>
+                    tr.classList.toggle("d-none", on && tr.dataset.needsAttention !== "true"));
+                document.querySelectorAll(".month-card").forEach(card => {
+                    const anyVisible = card.querySelector("tbody tr:not(.d-none)") !== null;
+                    card.classList.toggle("d-none", on && !anyVisible);
+                });
+                sessionStorage.setItem(storageKey, on ? "1" : "0");
+            }
+
+            toggle.checked = sessionStorage.getItem(storageKey) === "1";
+            toggle.addEventListener("change", apply);
+            apply();
+        })();
+    </script>
+}

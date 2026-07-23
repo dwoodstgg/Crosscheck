@@ -37,4 +37,8 @@ public class TimeEntry
 
     public Guid? ApprovedById { get; set; }
     public DateTimeOffset? ApprovedAt { get; set; }
+
+    /// <summary>Set when the entry was created by a timesheet import — links it to the
+    /// import so the whole batch can be reviewed or rolled back until invoiced.</summary>
+    public Guid? ImportId { get; set; }
 }

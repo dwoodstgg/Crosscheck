@@ -14,11 +14,9 @@ public interface IProjectRepository
 
     Task<Project?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Finds a project by code. Codes are globally unique, so this is the lookup
+    /// used to enforce that uniqueness on create/edit and to match imported timesheets.</summary>
     Task<Project?> GetByCodeAsync(string code, CancellationToken cancellationToken = default);
-
-    /// <summary>Finds a project by (client, code). Codes are unique per client, so this is
-    /// the lookup used to enforce that uniqueness on create/edit.</summary>
-    Task<Project?> GetByClientAndCodeAsync(Guid clientId, string code, CancellationToken cancellationToken = default);
 
     Task AddAsync(Project project, CancellationToken cancellationToken = default);
 

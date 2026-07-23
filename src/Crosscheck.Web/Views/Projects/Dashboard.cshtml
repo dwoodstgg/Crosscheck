@@ -38,6 +38,15 @@
     </div>
 </div>
 
+@if (TempData["Notice"] is string notice)
+{
+    <div class="alert alert-success">@notice</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger">@err</div>
+}
+
 @if (Model.HasRateGaps)
 {
     <div class="alert alert-warning">
@@ -339,7 +348,7 @@
         </div>
     </div>
 
-    <div class="col-lg-5">
+    <div class="col-lg-12">
         <div class="card panel-card">
             <div class="card-header">Team</div>
             <ul class="list-group list-group-flush">
@@ -361,33 +370,119 @@
         </div>
     </div>
 
-    <div class="col-lg-7">
+    <div class="col-lg-12">
+        @{
+            // Editing here is the Ops/Admin correction path (e.g. after a timesheet import);
+            // the service enforces this server-side too. Invoiced entries always render locked.
+            var canEdit = User.IsInRole(Crosscheck.Domain.RoleNames.Admin)
+                || User.IsInRole(Crosscheck.Domain.RoleNames.OperationsManager);
+        }
         <div class="card panel-card">
-            <div class="card-header">Recent activity</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recorded entries</span>
+                <span class="text-muted small">@Model.Entries.Count entr@(Model.Entries.Count == 1 ? "y" : "ies")</span>
+            </div>
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table class="table table-sm table-hover align-middle mb-0">
                     <thead class="table-light">
-                        <tr><th class="ps-3">Date</th><th>Person</th><th>Role</th><th class="text-end">Worked</th><th class="pe-3">Status</th></tr>
+                        <tr>
+                            <th class="ps-3">Date</th>
+                            <th>Person</th>
+                            <th style="min-width:11rem">Role</th>
+                            <th class="text-end">Worked</th>
+                            <th style="min-width:20rem">Description</th>
+                            <th>Status</th>
+                            @if (canEdit)
+                            {
+                                <th class="text-end pe-3">Save</th>
+                            }
+                        </tr>
                     </thead>
                     <tbody>
-                        @foreach (var e in Model.Recent)
+                        @foreach (var e in Model.Entries)
                         {
-                            <tr>
-                                <td class="ps-3 text-nowrap">@e.Date.ToString("MMM d")</td>
+                            var editable = canEdit && e.Status != TimeEntryStatus.Invoiced;
+                            var formId = $"entry-form-{e.EntryId}";
+                            <tr id="entry-@e.EntryId">
+                                <td class="ps-3 text-nowrap">
+                                    @e.Date.ToString("MMM d, yyyy")
+                                    @if (editable)
+                                    {
+                                        <form id="@formId" asp-action="UpdateEntry" method="post" class="m-0">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="entryId" value="@e.EntryId" />
+                                            <input type="hidden" name="projectId" value="@Model.Project.Id" />
+                                        </form>
+                                    }
+                                </td>
                                 <td>@e.EmployeeName</td>
-                                <td>@e.RoleName @(!e.IsBillable ? "•" : "")</td>
-                                <td class="text-end">@Hrs(e.HoursWorked)</td>
-                                <td class="pe-3">
+                                <td>
+                                    @if (editable)
+                                    {
+                                        <select name="billingRoleId" form="@formId" class="form-select form-select-sm">
+                                            @foreach (var role in Model.BillableRoles.OrderBy(r => r.DisplayName))
+                                            {
+                                                <option value="@role.Id" selected="@(role.Id == e.BillingRoleId)">@role.DisplayName</option>
+                                            }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        @e.RoleName @(!e.IsBillable ? "•" : "")
+                                    }
+                                    @if (e.ModuleName is not null)
+                                    {
+                                        <div class="form-text mt-0">@e.ModuleName</div>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (editable)
+                                    {
+                                        <input type="number" name="hours" value="@Hrs(e.HoursWorked)" min="0.25" max="24" step="0.25"
+                                               form="@formId" class="form-control form-control-sm text-end ms-auto" style="width:5.5rem" />
+                                    }
+                                    else
+                                    {
+                                        @Hrs(e.HoursWorked)
+                                    }
+                                </td>
+                                <td>
+                                    @if (editable)
+                                    {
+                                        <input type="text" name="notes" value="@e.Notes" form="@formId" class="form-control form-control-sm" />
+                                    }
+                                    else
+                                    {
+                                        <span class="small">@e.Notes</span>
+                                    }
+                                </td>
+                                <td>
                                     <span class="badge @(e.Status switch {
                                         TimeEntryStatus.Open => "text-bg-warning-subtle text-warning-emphasis border border-warning-subtle",
                                         TimeEntryStatus.Approved => "text-bg-success-subtle text-success-emphasis border border-success-subtle",
                                         _ => "text-bg-secondary" })">@e.Status.ToString().ToLowerInvariant()</span>
                                 </td>
+                                @if (canEdit)
+                                {
+                                    <td class="text-end pe-3">
+                                        @if (editable)
+                                        {
+                                            <button type="submit" form="@formId" class="btn btn-sm btn-outline-primary"
+                                                    title="Save this entry's changes" aria-label="Save entry">
+                                                <i class="bi bi-save"></i>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">locked</span>
+                                        }
+                                    </td>
+                                }
                             </tr>
                         }
-                        @if (Model.Recent.Count == 0)
+                        @if (Model.Entries.Count == 0)
                         {
-                            <tr><td colspan="5" class="text-muted text-center py-3">No time logged yet.</td></tr>
+                            <tr><td colspan="@(canEdit ? 7 : 6)" class="text-muted text-center py-3">No time logged yet.</td></tr>
                         }
                     </tbody>
                 </table>

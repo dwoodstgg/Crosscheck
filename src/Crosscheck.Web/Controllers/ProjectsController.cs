@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Crosscheck.Application.Projects;
+using Crosscheck.Application.TimeEntries;
 using Crosscheck.Domain;
 using Crosscheck.Domain.Entities;
 using Crosscheck.Domain.Enums;
@@ -16,7 +17,8 @@ public class ProjectsController(
     AssignmentService assignmentService,
     BudgetService budgetService,
     ModuleService moduleService,
-    ProjectDashboardService dashboardService) : Controller
+    ProjectDashboardService dashboardService,
+    TimeEntryService timeEntryService) : Controller
 {
     public async Task<IActionResult> Index(CancellationToken cancellationToken)
     {
@@ -35,6 +37,28 @@ public class ProjectsController(
 
         ViewBag.SwitcherProjects = await projectAdmin.ListAsync(cancellationToken);
         return View(dashboard);
+    }
+
+    /// <summary>Inline edit from the dashboard's Recorded entries table (hours worked,
+    /// billing role, description). Ops/Admin correct anyone's entries — e.g. after a
+    /// timesheet import; invoiced entries stay locked.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> UpdateEntry(
+        Guid entryId, Guid projectId, decimal hours, Guid billingRoleId, string? notes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await timeEntryService.EditEntryAsync(entryId, hours, billingRoleId, notes, cancellationToken);
+            TempData["Notice"] = "Entry updated.";
+        }
+        catch (Exception ex) when (ex is DomainException or UnauthorizedAccessException)
+        {
+            TempData["Error"] = ex.Message;
+        }
+
+        return RedirectToAction(nameof(Dashboard), null, new { id = projectId }, $"entry-{entryId}");
     }
 
     [HttpGet]

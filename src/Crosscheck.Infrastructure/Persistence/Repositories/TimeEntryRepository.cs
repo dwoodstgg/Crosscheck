@@ -11,7 +11,8 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
     private const string SelectColumns =
         """
         SELECT id, project_id, module_id, employee_id, billing_role_id, entry_date,
-               hours_worked, hours_billed, notes, is_billable, status, approved_by, approved_at
+               hours_worked, hours_billed, notes, is_billable, status, approved_by, approved_at,
+               import_id
         FROM time_entries
         """;
 
@@ -75,7 +76,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
                    te.billing_role_id, r.display_name AS role_name,
                    te.module_id, m.name AS module_name,
                    (m.deleted_at IS NOT NULL) AS module_deleted,
-                   te.hours_worked, te.hours_billed,
+                   te.hours_worked, te.hours_billed, te.notes,
                    COALESCE(
                        (SELECT mr.hourly_rate FROM project_module_rates mr
                         WHERE mr.module_id = te.module_id
@@ -103,7 +104,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
             row.Id, row.EntryDate, DbEnum.FromDb<TimeEntryStatus>(row.Status), row.IsBillable,
             row.EmployeeId, row.EmployeeName!, row.BillingRoleId, row.RoleName!,
             row.ModuleId, row.ModuleName, row.ModuleDeleted,
-            row.HoursWorked, row.HoursBilled, row.ResolvedRate)).ToList();
+            row.HoursWorked, row.HoursBilled, row.Notes, row.ResolvedRate)).ToList();
     }
 
     public async Task AddAsync(TimeEntry entry, CancellationToken cancellationToken = default)
@@ -113,10 +114,12 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
             """
             INSERT INTO time_entries
                 (id, project_id, module_id, employee_id, billing_role_id, entry_date,
-                 hours_worked, hours_billed, notes, is_billable, status, approved_by, approved_at)
+                 hours_worked, hours_billed, notes, is_billable, status, approved_by, approved_at,
+                 import_id)
             VALUES
                 (@Id, @ProjectId, @ModuleId, @EmployeeId, @BillingRoleId, @EntryDate,
-                 @HoursWorked, @HoursBilled, @Notes, @IsBillable, @Status, @ApprovedById, @ApprovedAt)
+                 @HoursWorked, @HoursBilled, @Notes, @IsBillable, @Status, @ApprovedById, @ApprovedAt,
+                 @ImportId)
             """,
             ToParameters(entry),
             cancellationToken: cancellationToken));
@@ -171,6 +174,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
         Status = DbEnum.ToDb(entry.Status),
         entry.ApprovedById,
         entry.ApprovedAt,
+        entry.ImportId,
     };
 
     private static TimeEntry ToEntity(TimeEntryRow row) => new()
@@ -188,6 +192,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
         Status = DbEnum.FromDb<TimeEntryStatus>(row.Status),
         ApprovedById = row.ApprovedBy,
         ApprovedAt = row.ApprovedAt,
+        ImportId = row.ImportId,
     };
 
     private class TimeEntryRow
@@ -205,6 +210,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
         public string Status { get; set; } = "open";
         public Guid? ApprovedBy { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }
+        public Guid? ImportId { get; set; }
     }
 
     private sealed class ApprovalRow : TimeEntryRow
@@ -228,6 +234,7 @@ public class TimeEntryRepository(NpgsqlDataSource dataSource) : ITimeEntryReposi
         public bool ModuleDeleted { get; set; }
         public decimal HoursWorked { get; set; }
         public decimal HoursBilled { get; set; }
+        public string? Notes { get; set; }
         public decimal? ResolvedRate { get; set; }
     }
 }

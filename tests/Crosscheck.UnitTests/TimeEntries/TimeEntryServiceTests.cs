@@ -347,4 +347,87 @@ public class TimeEntryServiceTests
 
         Assert.Equal(TimeEntryStatus.Approved, _entries.Entries.Single().Status);
     }
+
+    // ---- EditEntryAsync (in-place corrections, e.g. from the project dashboard) ----
+
+    [Fact]
+    public async Task Edit_updates_hours_role_and_notes_and_re_approves()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+        var pm = new Role { Id = Guid.NewGuid(), Name = RoleNames.ProjectManager, DisplayName = "Project Manager", IsBillable = true };
+        _roles.Roles.Add(pm);
+        _rateCards.Rates.Add(new ProjectRateCard { Id = Guid.NewGuid(), ProjectId = _project.Id, RoleId = pm.Id, HourlyRate = 200m });
+
+        var updated = await _service.EditEntryAsync(entry.Id, 6.75m, pm.Id, "corrected");
+
+        Assert.Equal(6.75m, updated.HoursWorked);
+        Assert.Equal(6.75m, updated.HoursBilled); // billed tracks worked again after an edit
+        Assert.Equal(pm.Id, updated.BillingRoleId);
+        Assert.Equal("corrected", updated.Notes);
+        Assert.Equal(TimeEntryStatus.Approved, updated.Status);
+    }
+
+    [Fact]
+    public async Task Edit_returns_the_entry_to_open_when_the_new_role_has_no_rate()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+        var pm = new Role { Id = Guid.NewGuid(), Name = RoleNames.ProjectManager, DisplayName = "Project Manager", IsBillable = true };
+        _roles.Roles.Add(pm); // no rate card for PM
+
+        var updated = await _service.EditEntryAsync(entry.Id, 4m, pm.Id, "work");
+
+        Assert.Equal(TimeEntryStatus.Open, updated.Status);
+        Assert.Null(updated.ApprovedById);
+    }
+
+    [Fact]
+    public async Task Edit_blocks_an_invoiced_entry()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+        entry.Status = TimeEntryStatus.Invoiced;
+
+        await Assert.ThrowsAsync<DomainException>(() =>
+            _service.EditEntryAsync(entry.Id, 5m, _developer.Id, "work"));
+    }
+
+    [Fact]
+    public async Task Edit_of_anothers_entry_requires_operations_manager()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+        entry.EmployeeId = Guid.NewGuid(); // someone else's entry now
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            _service.EditEntryAsync(entry.Id, 5m, _developer.Id, "work"));
+
+        _currentUser.Roles.Add(RoleNames.OperationsManager);
+        var updated = await _service.EditEntryAsync(entry.Id, 5m, _developer.Id, "work");
+        Assert.Equal(5m, updated.HoursWorked);
+    }
+
+    [Fact]
+    public async Task Edit_rejects_a_non_billable_role()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+
+        await Assert.ThrowsAsync<DomainException>(() =>
+            _service.EditEntryAsync(entry.Id, 4m, _admin.Id, "work"));
+    }
+
+    [Fact]
+    public async Task Edit_requires_a_description_on_billable_time()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+
+        await Assert.ThrowsAsync<DescriptionRequiredException>(() =>
+            _service.EditEntryAsync(entry.Id, 4m, _developer.Id, "  "));
+    }
+
+    [Fact]
+    public async Task Edit_rejects_zero_hours()
+    {
+        var entry = (await _service.SaveHoursAsync(_project.Id, Day, 4m, _developer.Id, "work"))!;
+
+        await Assert.ThrowsAsync<DomainException>(() =>
+            _service.EditEntryAsync(entry.Id, 0m, _developer.Id, "work"));
+    }
 }

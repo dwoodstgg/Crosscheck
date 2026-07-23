@@ -28,7 +28,7 @@ public class ProjectDashboardServiceTests
     public ProjectDashboardServiceTests()
     {
         _modules = new FakeModuleRepository(_roles);
-        _service = new ProjectDashboardService(_currentUser, _projects, _clients, _assignments, _entries, _budgets, _modules);
+        _service = new ProjectDashboardService(_currentUser, _projects, _clients, _assignments, _entries, _budgets, _modules, _roles);
 
         _client = new Client { Id = Guid.NewGuid(), Name = "Acme" };
         _clients.Clients.Add(_client);

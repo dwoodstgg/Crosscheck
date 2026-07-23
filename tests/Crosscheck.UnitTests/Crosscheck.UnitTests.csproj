@@ -21,6 +21,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Crosscheck.Domain\Crosscheck.Domain.csproj" />
     <ProjectReference Include="..\..\src\Crosscheck.Application\Crosscheck.Application.csproj" />
+    <ProjectReference Include="..\..\src\Crosscheck.Infrastructure\Crosscheck.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The company workbook the timesheet parser tests run against -->
+    <Content Include="..\..\Samples\2026 Don Woods timesheet.xlsx" Link="Samples\2026 Don Woods timesheet.xlsx" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

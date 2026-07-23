@@ -176,6 +176,67 @@ public class TimeEntryService(
         entry.ApprovedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>Edits an existing entry in place — hours worked, billing role, description —
+    /// keeping its cell (project, module, day) and owner. The owner edits their own; Ops/Admin
+    /// edit on anyone's behalf (e.g. correcting imported entries from the project dashboard).
+    /// Auto-approval re-runs, so hours_billed tracks worked again and a role change re-resolves
+    /// the rate; invoiced entries stay locked (void the invoice instead).</summary>
+    public async Task<TimeEntry> EditEntryAsync(
+        Guid entryId, decimal hours, Guid billingRoleId, string? notes,
+        CancellationToken cancellationToken = default)
+    {
+        var entry = await entries.GetAsync(entryId, cancellationToken)
+            ?? throw new DomainException("Unknown time entry.");
+        ResolveOwner(entry.EmployeeId);
+
+        if (entry.Status == TimeEntryStatus.Invoiced)
+        {
+            throw new DomainException("This entry is on an invoice — the invoice must be voided before it can change.");
+        }
+
+        ValidateHours(hours);
+        if (hours == 0)
+        {
+            throw new DomainException("Hours must be greater than zero — remove the entry instead.");
+        }
+
+        await RequireOpenWindowAsync(entry.EntryDate, cancellationToken);
+
+        var role = await roles.GetByIdAsync(billingRoleId, cancellationToken)
+            ?? throw new DomainException("Unknown billing role.");
+        if (!role.IsBillable)
+        {
+            throw new DomainException($"{role.Name} is not a billable role — it cannot be an entry's billing role.");
+        }
+
+        var project = await projects.GetByIdAsync(entry.ProjectId, cancellationToken)
+            ?? throw new DomainException("Unknown project.");
+        var client = await clients.GetByIdAsync(project.ClientId, cancellationToken)
+            ?? throw new DomainException("Unknown client.");
+        var isBillable = !client.IsInternal && project.Type != ProjectType.Internal;
+
+        if (isBillable && string.IsNullOrWhiteSpace(notes))
+        {
+            throw new DescriptionRequiredException();
+        }
+
+        // The module is the cell's identity and never changes here; it still steers
+        // auto-approval (fixed-price modules approve without a rate).
+        var module = entry.ModuleId is { } moduleId
+            ? await modules.GetByIdAsync(moduleId, cancellationToken)
+            : null;
+
+        entry.HoursWorked = hours;
+        entry.HoursBilled = hours;
+        entry.BillingRoleId = billingRoleId;
+        entry.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        entry.IsBillable = isBillable;
+        await AutoApproveAsync(entry, module, cancellationToken);
+        await entries.UpdateAsync(entry, cancellationToken);
+        await budgetAlerts.EvaluateAsync(entry.ProjectId, cancellationToken);
+        return entry;
+    }
+
     /// <summary>Removes an entry (clearing a cell). Owner-only edit rules apply; invoiced
     /// entries are protected.</summary>
     public async Task DeleteAsync(Guid entryId, CancellationToken cancellationToken = default)
